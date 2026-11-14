@@ -25,6 +25,10 @@ const BEER_FREE_DAY_XP = 30;         // past logged days with no beers
 const LOW_BEER_DAY_XP = 20;          // past logged days with LOW_BEER_LIMIT or fewer
 const LOW_BEER_LIMIT = 2;
 
+// Move page picker
+const DEFAULT_FAVORITES = ["burpees", "steps"]; // big buttons at the top of Move; the rest sit behind "More" (change per exercise in its Edit sheet)
+const MAX_FAVORITES = 4;
+
 // Number entry
 const MAX_ENTRY_NUMBER = 100000;      // largest number in one entry (reps, steps …)
 const MAX_ENTRY_SECONDS = 36000;      // largest timed entry, in seconds (10 hours)
@@ -231,6 +235,7 @@ function normalize(s) {
   s.app = "superhuman-day"; s.version = DATA_VERSION;
   s.settings = Object.assign(clone(DEFAULT_SETTINGS), s.settings || {});
   if (!Array.isArray(s.settings.quick) || !s.settings.quick.length) s.settings.quick = DEFAULT_QUICK_AMOUNTS.slice();
+  if (s.settings.favorites !== undefined && !(Array.isArray(s.settings.favorites) && s.settings.favorites.every(x => typeof x === "string"))) delete s.settings.favorites;
   const deh = Number(s.settings.dayEndHour);
   s.settings.dayEndHour = Number.isInteger(deh) && deh >= 0 && deh <= MAX_DAY_END_HOUR ? deh : DEFAULT_DAY_END_HOUR;
   if (!Array.isArray(s.exercises) || !s.exercises.length) s.exercises = f.exercises;
@@ -274,6 +279,10 @@ const dayW = k => S.days[k] ? normDay(S.days[k]) : (S.days[k] = blankDay()); // 
 const exById = id => S.exercises.find(e => e.id === id);
 const activeExercises = () => S.exercises.filter(e => !e.archived);
 const stepsEx = () => S.exercises.find(e => !e.archived && (e.id === "steps" || /^\s*steps?\s*$/i.test(e.name || "")));
+function favExercises() {
+  const ids = Array.isArray(S.settings.favorites) ? S.settings.favorites : DEFAULT_FAVORITES.map(id => id === "steps" ? (stepsEx() || {}).id : id);
+  return ids.map(exById).filter(e => e && !e.archived).slice(0, MAX_FAVORITES);
+}
 const curEx = () => { const e = exById(S.settings.lastExercise); return e && !e.archived ? e : activeExercises()[0]; };
 
 /* ---------- units ---------- */
@@ -437,7 +446,7 @@ function mutate(fn, { rerender = true } = {}) {
    ===================================================================== */
 let tab = "today", winsDate = todayKey(), momentType = "win", shuffleN = 0, openSection = null;
 let renderedDay = todayKey();
-let logDate = null, hiddenAt = 0, showAllLog = false; // logDate: past day the Move page logs to (null = today)
+let logDate = null, hiddenAt = 0, showAllLog = false, moreOpen = false; // logDate: past day the Move page logs to (null = today)
 const moveDay = () => logDate && logDate < todayKey() ? logDate : todayKey();
 const dayTitle = k => k === todayKey() ? "Today" : k === addDays(todayKey(), -1) ? "Yesterday" : fmtDate(k);
 const dayWord = k => k === todayKey() ? "today" : k === addDays(todayKey(), -1) ? "yesterday" : "on " + fmtDate(k);
@@ -476,7 +485,7 @@ function go(t, opts = {}) {
   tab = t; S.settings.lastTab = t; save();
   if (t === "wins") winsDate = opts.date || todayKey();
   // Leaving Move (or opening it fresh) goes back to logging to today, so nothing lands on the wrong day by accident.
-  logDate = t === "move" && opts.date && opts.date < todayKey() ? opts.date : null; showAllLog = false;
+  logDate = t === "move" && opts.date && opts.date < todayKey() ? opts.date : null; showAllLog = false; moreOpen = false;
   if (opts.ex) S.settings.lastExercise = opts.ex;
   if (opts.section) openSection = opts.section;
   render(); scrollTo(0, 0);
@@ -728,8 +737,12 @@ function timerHTML() {
 }
 function viewMove() {
   const e = curEx();
-  const chips = activeExercises().map(x => `<button class="chip ex" data-act="pickex" data-ex="${esc(x.id)}" aria-pressed="${e && x.id === e.id}">${esc(x.name)}</button>`).join("") + `<button class="chip add" data-act="newex">+ New</button>`;
-  if (!e) return `<div class="chips scroll">${chips}</div><p class="muted">Add an exercise to start counting.</p>`;
+  const favIds = favExercises().map(x => x.id), others = activeExercises().filter(x => !favIds.includes(x.id)), other = e && !favIds.includes(e.id);
+  const chips = others.map(x => `<button class="chip ex" data-act="pickex" data-ex="${esc(x.id)}" aria-pressed="${e && x.id === e.id}">${esc(x.name)}</button>`).join("") + `<button class="chip add" data-act="newex">+ New</button>`;
+  const picker = `<div class="picker" role="group" aria-label="Exercise"><div class="favs" id="favRow">${favTilesHTML(e)}</div>
+    <button class="morebtn${other ? " on" : ""}" data-act="moreex" aria-expanded="${moreOpen}">${other ? `<b>${esc(e.name)}</b> · More` : "More exercises"}<span aria-hidden="true">${moreOpen ? "▴" : "▾"}</span></button>
+    ${moreOpen ? `<div class="chips">${chips}</div>` : ""}</div>`;
+  if (!e) return `${picker}<p class="muted">Add an exercise to start counting.</p>`;
   const st = S.settings, style = `style-${st.buttonStyle} color-${st.buttonColor}`, mk = moveDay();
   const toDay = mk !== todayKey() ? `<span class="bto">to ${esc(fmtDate(mk))}</span>` : "";
   let zone = "";
@@ -755,7 +768,7 @@ function viewMove() {
       <div class="stepper"><label for="wkNote">Note (optional)</label><div><input id="wkNote" type="text" maxlength="80" placeholder="e.g. legs and core"></div></div></div>
       <div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="logworkout"><span class="bplus">Done ✓</span><span class="bname">${esc(e.name)}</span>${toDay}</button></div>`;
   }
-  return `<div class="chips scroll" role="group" aria-label="Exercise">${chips}</div>
+  return `${picker}
     ${logBannerHTML()}
     <div id="levelBox">${levelCard(levelNudge(e))}</div>
     <section class="panel tapzone"><div class="rowsb"><h2>${esc(e.name)}</h2><button class="linkbtn" data-act="editex" data-ex="${esc(e.id)}">Edit</button></div>
@@ -766,10 +779,18 @@ function viewMove() {
     ${timerHTML()}
     <section class="panel"><div class="rowsb"><p class="label">Log · ${esc(dayTitle(mk))}</p><button class="linkbtn" data-act="undo">Undo last</button></div><div id="moveLog">${moveLogHTML()}</div></section>`;
 }
+function favTilesHTML(cur) {
+  const k = moveDay(), d = day(k);
+  return favExercises().map(x => {
+    const v = exDone(d, x), show = x.type === "timed" ? fmtDur(v) : v.toLocaleString();
+    const sub = x.type === "weighted" ? `${d.sets.filter(s => s.ex === x.id).length} sets` : x.type === "workout" ? `${v} done` : x.goal ? `${show} / ${x.type === "timed" ? fmtDur(x.goal) : x.goal.toLocaleString()}` : show;
+    return `<button class="favbtn" data-act="fav" data-ex="${esc(x.id)}" aria-pressed="${!!cur && x.id === cur.id}"><b>${esc(x.name)}</b><small>${sub} ${esc(dayWord(k))}</small></button>`;
+  }).join("");
+}
 function updateMoveLive() {
   const e = curEx(); if (tab !== "move" || !e) return;
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
-  set("todayCount", todayCountHTML(e)); set("levelBox", levelCard(levelNudge(e))); set("exStats", exStatsHTML(e)); set("moveLog", moveLogHTML());
+  set("favRow", favTilesHTML(e)); set("todayCount", todayCountHTML(e)); set("levelBox", levelCard(levelNudge(e))); set("exStats", exStatsHTML(e)); set("moveLog", moveLogHTML());
 }
 function animateTap(label) {
   const b = $("#bigBtn"); if (!b) return;
@@ -1078,7 +1099,7 @@ function planHTML() {
       <li>Constipation: more vegetables, water to thirst, magnesium.</li></ul></div></div>`;
 }
 function exercisesHTML() {
-  return `<ul class="exlist">${activeExercises().map(e => `<li><div><b>${esc(e.name)}</b><small>${TYPE_LABEL[e.type]} · ${xpText(e)}${e.goal ? ` · goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal}/day` : ""}${e.nudge ? " · daily nudge" : ""}</small></div><button class="btn small" data-act="editex" data-ex="${esc(e.id)}">Edit</button></li>`).join("")}</ul>
+  return `<ul class="exlist">${activeExercises().map(e => `<li><div><b>${esc(e.name)}</b><small>${TYPE_LABEL[e.type]} · ${xpText(e)}${e.goal ? ` · goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal}/day` : ""}${e.nudge ? " · daily nudge" : ""}${favExercises().some(x => x.id === e.id) ? " · big button" : ""}</small></div><button class="btn small" data-act="editex" data-ex="${esc(e.id)}">Edit</button></li>`).join("")}</ul>
     <button class="btn ghostbtn" data-act="newex">+ Add an exercise or workout</button>
     ${S.exercises.some(e => e.archived) ? `<p class="note">Hidden: ${S.exercises.filter(e => e.archived).map(e => `<button class="linkbtn" data-act="unhide" data-ex="${esc(e.id)}">${esc(e.name)} (show)</button>`).join(" ")}</p>` : ""}`;
 }
@@ -1170,6 +1191,7 @@ function exerciseSheet(id) {
     <div class="two"><div class="field"><label for="exXP" id="exXPl">${XP_LABEL[type]}</label><input id="exXP" type="number" inputmode="decimal" step="any" min="0" value="${e ? e.xp : type === "workout" ? 30 : DEFAULT_XP_PER_REP}"></div>
       <div class="field" id="exGoalF" ${type === "workout" || type === "weighted" ? "hidden" : ""}><label for="exGoal">Daily goal${type === "timed" ? " (seconds)" : ""}</label><input id="exGoal" type="number" inputmode="numeric" min="0" value="${e && e.goal ? e.goal : ""}" placeholder="Optional"></div></div>
     <label class="switchrow" id="exTapF" ${type === "reps" ? "" : "hidden"}><span><b>Big +1 button</b><small>Turn off for things you type in, like steps</small></span><input type="checkbox" class="sw" id="exTap" ${!e || e.tap !== false ? "checked" : ""}></label>
+    <label class="switchrow"><span><b>Big button on Move</b><small>Up to ${MAX_FAVORITES}. The rest sit behind More.</small></span><input type="checkbox" class="sw" id="exFav" ${e && favExercises().some(x => x.id === e.id) ? "checked" : ""}></label>
     <label class="switchrow"><span><b>Daily nudge</b><small>Remind me on the Today screen if I haven't done it</small></span><input type="checkbox" class="sw" id="exNudge" ${e && e.nudge ? "checked" : ""}></label>
     <div class="row2"><button class="btn primary" type="submit">${e ? "Save" : "Add"}</button><button class="btn" type="button" data-act="closesheet">Cancel</button></div>
     ${e ? `<button class="btn danger" type="button" data-act="hideex" data-ex="${esc(e.id)}">Hide this exercise</button><p class="note">Hiding keeps its history and XP. You can show it again from More > Exercises.</p>` : ""}</form>`);
@@ -1256,7 +1278,8 @@ document.addEventListener("click", ev => {
     case "import": $("#importFile").value = ""; $("#importFile").click(); break;
     case "undoimport": undoImport(); break;
     case "shuffle": shuffleN++; render(); break;
-    case "pickex": S.settings.lastExercise = ds.ex; save(); if (hold && hold.ex !== ds.ex) stopHold(false); render(); break;
+    case "pickex": case "fav": S.settings.lastExercise = ds.ex; moreOpen = false; save(); if (hold && hold.ex !== ds.ex) stopHold(false); render(); break;
+    case "moreex": moreOpen = !moreOpen; render(); break;
     case "tap": addReps(1); break;
     case "addn": addReps(+ds.n); break;
     case "hold": if (hold) stopHold(true); else { hold = { ex: curEx().id, start: Date.now() }; sfx("tap"); buzz(); ensureTicker(); render(); } break;
@@ -1351,7 +1374,12 @@ document.addEventListener("submit", ev => {
     const type = id && $("#exType").disabled ? e.type : $("#exType").value;
     Object.assign(e, { name, type, xp: Math.max(0, parseFloat($("#exXP").value) || 0), goal: (type === "reps" || type === "timed") ? (parseInt($("#exGoal").value, 10) || 0) : 0, nudge: $("#exNudge").checked, tap: type === "reps" ? $("#exTap").checked : undefined });
     if (!id) { e.medal = name; e.tiers = defaultTiers(type); S.exercises.push(e); }
-    S.settings.lastExercise = e.id; save(); closeSheet(); render(); toast(id ? "Saved" : `Added ${name}`); return;
+    const favs = favExercises().map(x => x.id), wantFav = $("#exFav").checked; let favMsg = "";
+    if (wantFav !== favs.includes(e.id)) {
+      if (wantFav && favs.length >= MAX_FAVORITES) favMsg = `Saved. Up to ${MAX_FAVORITES} big buttons, so turn one off first.`;
+      else S.settings.favorites = wantFav ? favs.concat(e.id) : favs.filter(x => x !== e.id);
+    }
+    S.settings.lastExercise = e.id; save(); closeSheet(); render(); toast(favMsg || (id ? "Saved" : `Added ${name}`)); return;
   }
   if (kind === "habit") {
     const name = $("#hName").value.trim(); if (!name) return;

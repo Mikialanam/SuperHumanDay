@@ -63,7 +63,8 @@ const snapshot = page => page.evaluate(() => ({
 }));
 const reps = (page, k, ex) => page.evaluate(([k, ex]) => (S.days[k] && S.days[k].reps[ex]) || 0, [k, ex]);
 const noHScroll = page => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
-const shot = (page, name) => page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: false });
+// the test clock is frozen, so let toasts and animations finish before each screenshot
+const shot = async (page, name) => { try { await page.clock.runFor(4000); } catch (e) {} return page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: false }); };
 const tab = (page, name) => page.click(`.tabbtn[data-tab="${name}"]`);
 
 (async () => {
@@ -173,6 +174,7 @@ const tab = (page, name) => page.click(`.tabbtn[data-tab="${name}"]`);
     ok(favs[0] === "burpees" && favs[1] === "steps", "Burpees and Steps are the first big buttons: " + favs.join(", "));
     ok(await page.isVisible('[data-act="moreex"]'), "a More button holds the rest");
     await page.click('[data-act="moreex"]');
+    await shot(page, "move-more-open");
     await page.click('[data-act="pickex"][data-ex="pushups"]');
     ok(await page.evaluate(() => curEx().id) === "pushups", "picked push-ups from More");
     await shot(page, "move-more");

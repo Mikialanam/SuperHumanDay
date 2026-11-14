@@ -384,3 +384,22 @@ details.panel:not([open]) { gap: 0; }
 .counter { min-width: 0; }
 .stepsbox .btn.small { min-height: 40px; padding: 6px 12px; }
 .stepsbox b { padding-left: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Move page picker: favourite exercises as big buttons, the rest behind More */
+.picker { display: flex; flex-direction: column; gap: 8px; }
+.favs { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.favbtn {
+  min-height: 72px; border-radius: 18px; border: 1px solid var(--line); background: var(--panel); padding: 10px 14px;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; text-align: left;
+  transition: transform .08s;
+}
+.favbtn b { font-family: var(--display); font-size: 1.2rem; }
+.favbtn small { color: var(--muted); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.favbtn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.favbtn[aria-pressed="true"] small { color: inherit; opacity: .8; }
+.favbtn:active { transform: scale(.97); }
+.morebtn {
+  min-height: 44px; border-radius: 14px; border: 1px dashed var(--line); background: none; color: var(--accent); font-weight: 650;
+  display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 14px;
+}
+.morebtn.on { border-style: solid; background: var(--ink); color: var(--bg); border-color: var(--ink); }
