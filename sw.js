@@ -1,7 +1,7 @@
 /* Superhuman Day service worker: lets the app open offline.
    It only caches the app's own files. Your data lives in localStorage, never here.
    Bump CACHE when you change any file so phones pick up the new version. */
-const CACHE = "superhuman-day-v1.0.0";
+const CACHE = "superhuman-day-v2.1";
 const ASSETS = [
   "./", "index.html", "css/app.css", "js/app.js", "manifest.webmanifest",
   "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",

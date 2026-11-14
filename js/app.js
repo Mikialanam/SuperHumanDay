@@ -34,8 +34,13 @@ const DEFAULT_START_WEIGHT = { lb: 45, kg: 20 };
 const DEFAULT_START_REPS = 8;
 const REST_TIMER_PRESETS = [60, 90, 120]; // seconds
 
+// Days and dates
+const DEFAULT_DAY_END_HOUR = 3;      // your day ends at 3am: anything logged before then counts toward the previous day (changeable in Settings)
+const MAX_DAY_END_HOUR = 6;          // latest day end offered in Settings (6 = 6am)
+const BACKDATE_KEEP_MINUTES = 5;     // logging to a past day switches back to today if the app is away longer than this (or when you leave Move)
+
 // Nudges and morning screen
-const BACKUP_REMINDER_DAYS = 7;      // remind to export when the last backup is older than this
+const BACKUP_REMINDER_DAYS = 7;     // remind to export when the last backup is older than this
 const OLD_WINS_SHOWN = 3;            // random older wins on the morning screen
 const EVENING_HOUR = 18;             // after this hour, nudge to log a win if none yet
 
@@ -98,14 +103,17 @@ const PLAN_START = "2026-10-28", PLAN_START_KG = 86, PLAN_GOAL_KG = 75;
 
 const STORAGE_KEY = "superhuman-day";
 const PRE_IMPORT_KEY = "superhuman-day-before-import";
-const DATA_VERSION = 1;
+const PRE_MIGRATION_KEY = "superhuman-day-before-v2"; // untouched copy of version 1 data, kept on the device
+const DATA_VERSION = 2; // 2: every exercise entry has an id and day totals are worked out from the entries
 const KG_PER_LB = 0.45359237;
 const DEFAULT_SETTINGS = {
   name: "", unit: "lb", bodyUnit: "kg", quick: DEFAULT_QUICK_AMOUNTS.slice(),
   sound: "click", buttonStyle: "round", buttonColor: "green", haptics: true, theme: "auto",
   breathing: true, breathCues: true, showPlan: true,
   lastExercise: "burpees", lastTab: "today", breathPattern: "even", breathMinutes: 2, restSeconds: 90,
+  dayEndHour: DEFAULT_DAY_END_HOUR,
 };
+const MOVE_KINDS = ["reps", "set", "session"]; // log entries that are exercise entries
 const TYPE_LABEL = { reps: "Reps", weighted: "Weight × reps", timed: "Timed", workout: "Workout" };
 const XP_LABEL = { reps: "XP per rep", weighted: "XP per rep", timed: "XP per second", workout: "XP per workout" };
 const MOMENT_TYPES = { win: { label: "Win", icon: "★" }, loss: { label: "Loss", icon: "↘" }, grateful: { label: "Appreciate", icon: "♥" } };
@@ -115,13 +123,18 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = t => String(t ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad2 = n => String(n).padStart(2, "0");
 const dkey = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
-const todayKey = () => dkey(new Date());
+// The day ends at dayEndHour (3am by default), so 1am still belongs to the day before.
+function dayEndHour() { try { const h = S.settings.dayEndHour; return Number.isInteger(h) ? h : DEFAULT_DAY_END_HOUR; } catch (e) { return DEFAULT_DAY_END_HOUR; } }
+const afterMidnight = () => new Date().getHours() < dayEndHour();
+const todayKey = () => { const d = new Date(); if (d.getHours() < dayEndHour()) d.setDate(d.getDate() - 1); return dkey(d); };
+const hourLabel = h => h === 0 ? "midnight" : h + "am";
 const kdate = k => new Date(k + "T12:00:00");
 const addDays = (k, n) => { const d = kdate(k); d.setDate(d.getDate() + n); return dkey(d); };
 const daysBetween = (a, b) => Math.round((kdate(b) - kdate(a)) / 864e5);
 const fmtDate = (k, o) => kdate(k).toLocaleDateString(undefined, o || { weekday: "short", month: "short", day: "numeric" });
 const nowTime = () => { const d = new Date(); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+let uidN = 0;
+const uid = () => Date.now().toString(36) + (++uidN).toString(36) + Math.random().toString(36).slice(2, 6);
 const clone = o => JSON.parse(JSON.stringify(o));
 const nf = n => (Math.round(n * 10) / 10).toLocaleString();
 const n1 = n => String(Math.round(n * 10) / 10); // plain number for input fields
@@ -137,6 +150,41 @@ function normDay(d) {
   const b = blankDay();
   for (const k in b) if (d[k] === undefined || d[k] === null && b[k] !== null) d[k] = b[k];
   while (d.top3.length < 3) d.top3.push({ text: "", done: false });
+  return d;
+}
+// Day totals (d.reps) are always worked out from the day's entries, so moving or editing an entry keeps them right.
+function recalcReps(d) {
+  d.reps = {};
+  for (const x of d.log) if (x.k === "reps" && x.v > 0) d.reps[x.ex] = (d.reps[x.ex] || 0) + x.v;
+}
+/* Migration (safe to run any number of times; runs on load and on every import, so old backups still import).
+   Version 1 kept a running total per exercise plus a log without ids. Now every exercise entry has an id so it
+   can be edited, moved to another day or deleted. Totals are kept exactly: if an old total doesn't match its
+   entries, an "earlier" entry makes up the difference. */
+function migrateDay(d) {
+  if (!Array.isArray(d.log)) d.log = [];
+  if (!Array.isArray(d.sets)) d.sets = [];
+  if (!Array.isArray(d.sessions)) d.sessions = [];
+  if (!d.reps || typeof d.reps !== "object") d.reps = {};
+  d.log = d.log.filter(x => x && typeof x === "object");
+  for (const s of d.sets.concat(d.sessions)) if (!s.id) s.id = uid();
+  const setIds = new Set(d.sets.map(s => s.id)), sesIds = new Set(d.sessions.map(s => s.id));
+  d.log = d.log.filter(x => x.k === "set" ? setIds.has(x.id) : x.k === "session" ? sesIds.has(x.id) : true);
+  const logged = new Set(d.log.filter(x => x.k === "set" || x.k === "session").map(x => x.id));
+  for (const s of d.sets) if (!logged.has(s.id)) d.log.push({ k: "set", ex: s.ex, id: s.id, t: s.t || "" });
+  for (const s of d.sessions) if (!logged.has(s.id)) d.log.push({ k: "session", ex: s.ex, id: s.id, t: s.t || "" });
+  const sums = {};
+  for (const x of d.log) if (x.k === "reps") { if (!x.id) x.id = uid(); x.v = Number(x.v) || 0; sums[x.ex] = (sums[x.ex] || 0) + x.v; }
+  for (const ex of new Set(Object.keys(d.reps).concat(Object.keys(sums)))) {
+    const want = Math.max(0, Number(d.reps[ex]) || 0), have = sums[ex] || 0;
+    if (want > have) d.log.unshift({ k: "reps", ex, v: want - have, t: "", id: uid(), note: "earlier" });
+    else if (want < have) {
+      let extra = have - want;
+      for (let i = d.log.length - 1; i >= 0 && extra > 0; i--) { const x = d.log[i]; if (x.k !== "reps" || x.ex !== ex) continue; const cut = Math.min(x.v, extra); x.v -= cut; extra -= cut; }
+    }
+  }
+  d.log = d.log.filter(x => x.k !== "reps" || x.v > 0);
+  recalcReps(d);
   return d;
 }
 function dayHasData(d) {
@@ -157,30 +205,42 @@ function normalize(s) {
   s.app = "superhuman-day"; s.version = DATA_VERSION;
   s.settings = Object.assign(clone(DEFAULT_SETTINGS), s.settings || {});
   if (!Array.isArray(s.settings.quick) || !s.settings.quick.length) s.settings.quick = DEFAULT_QUICK_AMOUNTS.slice();
+  const deh = Number(s.settings.dayEndHour);
+  s.settings.dayEndHour = Number.isInteger(deh) && deh >= 0 && deh <= MAX_DAY_END_HOUR ? deh : DEFAULT_DAY_END_HOUR;
   if (!Array.isArray(s.exercises) || !s.exercises.length) s.exercises = f.exercises;
   if (!Array.isArray(s.habits)) s.habits = f.habits;
   if (!s.days || typeof s.days !== "object") s.days = {};
-  for (const k of Object.keys(s.days)) { if (!isDayKey(k) || typeof s.days[k] !== "object") delete s.days[k]; else normDay(s.days[k]); }
+  for (const k of Object.keys(s.days)) { if (!isDayKey(k) || !s.days[k] || typeof s.days[k] !== "object") delete s.days[k]; else migrateDay(normDay(s.days[k])); }
   s.meta = Object.assign(f.meta, s.meta || {});
   return s;
 }
-let storageOK = true;
+let storageOK = true, loadFailed = false;
 function load() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return normalize(JSON.parse(raw)); }
-  catch (e) { storageOK = false; }
-  return freshState();
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { storageOK = false; return freshState(); }
+  if (!raw) return freshState();
+  try {
+    const data = JSON.parse(raw);
+    // Before upgrading stored data for the first time, keep an untouched copy of it.
+    if (data && (data.version || 1) < DATA_VERSION) { try { if (!localStorage.getItem(PRE_MIGRATION_KEY)) localStorage.setItem(PRE_MIGRATION_KEY, raw); } catch (e) {} }
+    return normalize(data);
+  } catch (e) {
+    loadFailed = true; // never overwrite data we couldn't read
+    return freshState();
+  }
 }
 let S = load();
 let saveTimer = null;
 function writeNow() {
   clearTimeout(saveTimer); saveTimer = null;
+  if (loadFailed) return;
   for (const k of Object.keys(S.days)) if (!dayHasData(S.days[k])) delete S.days[k];
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(S)); storageOK = true; }
   catch (e) { storageOK = false; toast("Couldn't save on this device. Export a backup now."); }
 }
 function save(now) { if (now) return writeNow(); clearTimeout(saveTimer); saveTimer = setTimeout(writeNow, 300); }
 addEventListener("pagehide", writeNow);
-document.addEventListener("visibilitychange", () => { if (document.hidden) writeNow(); else onResume(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) { hiddenAt = Date.now(); writeNow(); } else onResume(); });
 
 const day = k => S.days[k] ? normDay(S.days[k]) : blankDay();          // read-only view
 const dayW = k => S.days[k] ? normDay(S.days[k]) : (S.days[k] = blankDay()); // for writing
@@ -350,6 +410,10 @@ function mutate(fn, { rerender = true } = {}) {
    ===================================================================== */
 let tab = "today", winsDate = todayKey(), momentType = "win", shuffleN = 0, openSection = null;
 let renderedDay = todayKey();
+let logDate = null, hiddenAt = 0, showAllLog = false; // logDate: past day the Move page logs to (null = today)
+const moveDay = () => logDate && logDate < todayKey() ? logDate : todayKey();
+const dayTitle = k => k === todayKey() ? "Today" : k === addDays(todayKey(), -1) ? "Yesterday" : fmtDate(k);
+const dayWord = k => k === todayKey() ? "today" : k === addDays(todayKey(), -1) ? "yesterday" : "on " + fmtDate(k);
 const drafts = {};
 let hold = null;   // running timed-exercise hold {ex, start}
 const timer = { mode: "stopwatch", running: false, start: 0, elapsed: 0, restEnd: 0 };
@@ -384,6 +448,8 @@ function render() {
 function go(t, opts = {}) {
   tab = t; S.settings.lastTab = t; save();
   if (t === "wins") winsDate = opts.date || todayKey();
+  // Leaving Move (or opening it fresh) goes back to logging to today, so nothing lands on the wrong day by accident.
+  logDate = t === "move" && opts.date && opts.date < todayKey() ? opts.date : null; showAllLog = false;
   if (opts.ex) S.settings.lastExercise = opts.ex;
   if (opts.section) openSection = opts.section;
   render(); scrollTo(0, 0);
@@ -463,19 +529,19 @@ function nudges() {
     else if (e.goal && v < e.goal && e.type !== "workout") out.push({ ic: "⚡", text: `${e.type === "timed" ? fmtDur(e.goal - v) : e.goal - v} more ${n} to hit ${e.type === "timed" ? fmtDur(e.goal) : e.goal}. ${v} done already.`, act: "goex", ex: e.id, label: "Go" });
   }
   if (S.settings.breathing && !d.breath.length) out.push({ ic: "🫁", text: "No breathing yet today, two minutes?", act: "gobreathe", label: "Breathe" });
-  if (hr >= EVENING_HOUR && !d.moments.some(m => m.type === "win")) out.push({ ic: "★", text: "Any wins today? Small ones count.", act: "gowins", label: "Add one" });
+  if ((hr >= EVENING_HOUR || afterMidnight()) && !d.moments.some(m => m.type === "win")) out.push({ ic: "★", text: "Any wins today? Small ones count.", act: "gowins", label: "Add one" });
   return out;
 }
 function viewToday() {
   const t = todayKey(), y = addDays(t, -1), yd = day(y), td = day(t), hr = new Date().getHours();
-  const greet = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
-  let h = `<section class="hello"><p class="eyebrow">${fmtDate(t, { weekday: "long", month: "long", day: "numeric" })}</p><h1>${greet}${S.settings.name ? ", " + esc(S.settings.name) : ""}</h1></section>`;
+  const greet = afterMidnight() ? "Still going" : hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+  let h = `<section class="hello"><p class="eyebrow">${fmtDate(t, { weekday: "long", month: "long", day: "numeric" })}</p><h1>${greet}${S.settings.name ? ", " + esc(S.settings.name) : ""}</h1>${afterMidnight() ? `<p class="note">It's after midnight. Your day ends at ${hourLabel(dayEndHour())}, so anything you log now counts toward ${esc(fmtDate(t))}.</p>` : ""}</section>`;
 
   // Yesterday
   const ys = top3Status(yd), ysup = isSuperhuman(yd), ymoves = moveSummary(yd);
   const ywins = yd.moments.filter(m => m.type === "win"), ygrat = yd.moments.filter(m => m.type === "grateful"), yextras = yd.extras.filter(x => x.done);
   if (!S.days[y]) {
-    h += `<section class="panel yesterday"><p class="label">Yesterday</p><h2>A blank page</h2><p class="muted">Nothing logged yesterday. That's fine. If you did something worth remembering, add it now.</p><button class="btn ghostbtn" data-act="gowins" data-date="${y}">Add yesterday's wins</button></section>`;
+    h += `<section class="panel yesterday"><p class="label">Yesterday</p><h2>A blank page</h2><p class="muted">Nothing logged yesterday. That's fine. If you did something worth remembering, add it now.</p><div class="row2"><button class="btn ghostbtn" data-act="gowins" data-date="${y}">Add wins</button><button class="btn ghostbtn" data-act="goex" data-date="${y}">Log exercise</button></div></section>`;
   } else {
     const verdict = ysup ? `<div class="verdict sup"><span>✦</span><div><b>Superhuman Day</b><small>All of your top 3, done.</small></div></div>`
       : yd.rest ? `<div class="verdict rest"><span>🌿</span><div><b>Rest day</b><small>Recovery counts. Streak kept.</small></div></div>`
@@ -487,7 +553,7 @@ function viewToday() {
       ${ywins.length ? `<div><p class="sublabel">Wins</p><ul class="plainlist">${ywins.map(m => `<li>★ ${esc(m.text)}</li>`).join("")}</ul></div>` : ""}
       ${ygrat.length ? `<div><p class="sublabel">Appreciated</p><ul class="plainlist">${ygrat.map(m => `<li>♥ ${esc(m.text)}</li>`).join("")}</ul></div>` : ""}
       ${ymoves.length ? `<p class="movesum">💪 ${esc(ymoves.join(" · "))}</p>` : ""}
-      <button class="btn ghostbtn" data-act="gowins" data-date="${y}">Open yesterday</button></section>`;
+      <div class="row2"><button class="btn ghostbtn" data-act="gowins" data-date="${y}">Edit wins</button><button class="btn ghostbtn" data-act="goex" data-date="${y}">Log exercise</button></div></section>`;
   }
 
   // Older wins, picked at random
@@ -513,7 +579,7 @@ function viewToday() {
 
 /* ---------- MOVE (exercise counter) ---------- */
 function liftStats(exId) {
-  const t = todayKey(); let heavy = null, e1 = null, mostReps = null, vol = null, last = null;
+  const t = moveDay(); let heavy = null, e1 = null, mostReps = null, vol = null, last = null;
   const keys = Object.keys(S.days).sort();
   for (const k of keys) {
     const sets = day(k).sets.filter(s => s.ex === exId); if (!sets.length) continue;
@@ -531,7 +597,7 @@ function liftStats(exId) {
   return { heavy, e1, mostReps, vol, last, today: day(t).sets.filter(s => s.ex === exId) };
 }
 function repStats(e) {
-  const t = todayKey(); let best = null, last = null, total = 0;
+  const t = moveDay(); let best = null, last = null, total = 0;
   for (const k of Object.keys(S.days).sort()) {
     const v = exDone(day(k), e); if (!v) continue; total += v;
     if (k !== t && (!best || v > best.v)) best = { v, k };
@@ -551,7 +617,7 @@ function levelNudge(e) {
 }
 function setLine(s) { return `${s.r} × ${wtxt(s.w)} ${lu()}`; }
 function exStatsHTML(e) {
-  const d = day(todayKey());
+  const k = moveDay(), d = day(k);
   if (e.type === "weighted") {
     const ls = liftStats(e.id);
     let beat = "";
@@ -566,33 +632,54 @@ function exStatsHTML(e) {
       <div><b>${ls.e1 ? nf(fromKg(ls.e1.v)) : "–"}</b><span>Best est. 1-rep max</span></div>
       <div><b>${ls.vol ? Math.round(fromKg(ls.vol.v)).toLocaleString() : "–"}</b><span>Best session volume</span></div></div>
       <p class="note">Personal bests in ${lu()}. 1-rep max estimated from your sets (Epley).</p>
-      ${ls.today.length ? `<div><p class="sublabel">Today's sets</p><ol class="sets">${ls.today.map((s, i) => `<li><span>Set ${i + 1}</span><b>${setLine(s)}</b><button class="x" data-act="delset" data-id="${esc(s.id)}" aria-label="Delete set ${i + 1}">×</button></li>`).join("")}</ol></div>` : ""}`;
+      ${ls.today.length ? `<div><p class="sublabel">Sets ${esc(dayWord(k))}</p><ol class="sets">${ls.today.map((s, i) => `<li><span>Set ${i + 1}</span><b>${setLine(s)}</b><button class="x" data-act="delset" data-id="${esc(s.id)}" aria-label="Delete set ${i + 1}">×</button></li>`).join("")}</ol></div>` : ""}`;
   }
   const rs = repStats(e), v = exDone(d, e);
   const show = n => e.type === "timed" ? fmtDur(n) : n.toLocaleString();
   return `<div class="pbs">
     <div><b>${rs.last ? show(rs.last.v) : "–"}</b><span>Last time${rs.last ? ` · ${fmtDate(rs.last.k, { month: "short", day: "numeric" })}` : ""}</span></div>
-    <div><b>${rs.best ? show(rs.best.v) : "–"}</b><span>Best day${rs.best && v > rs.best.v ? " · beaten today!" : ""}</span></div>
+    <div><b>${rs.best ? show(rs.best.v) : "–"}</b><span>Best day${rs.best && v > rs.best.v ? ` · beaten ${esc(dayWord(k))}!` : ""}</span></div>
     <div><b>${show(rs.total)}</b><span>All time</span></div></div>`;
 }
 function todayCountHTML(e) {
-  const v = exDone(day(todayKey()), e);
-  if (e.type === "weighted") { const n = day(todayKey()).sets.filter(s => s.ex === e.id).length; return `<b>${n}</b><span>${plural(n, "set")} today · ${v} reps</span>`; }
-  if (e.type === "workout") return `<b>${v}</b><span>${plural(v, "workout")} today</span>`;
-  const goal = e.goal ? `<div class="goalbar" aria-label="Daily goal ${e.goal}"><i style="width:${Math.min(100, v / e.goal * 100)}%"></i></div><small>${v >= e.goal ? "Goal hit! Every extra one is a bonus." : `Goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal} · ${e.type === "timed" ? fmtDur(e.goal - v) : e.goal - v} to go`}</small>` : "";
-  return `<b>${e.type === "timed" ? fmtDur(v) : v.toLocaleString()}</b><span>${e.type === "timed" ? "today" : esc(e.name.toLowerCase()) + " today"}</span>${goal}`;
+  const k = moveDay(), dw = esc(dayWord(k)), v = exDone(day(k), e);
+  if (e.type === "weighted") { const n = day(k).sets.filter(s => s.ex === e.id).length; return `<b>${n}</b><span>${plural(n, "set")} ${dw} · ${v} reps</span>`; }
+  if (e.type === "workout") return `<b>${v}</b><span>${plural(v, "workout")} ${dw}</span>`;
+  const goal = e.goal ? `<div class="goalbar" aria-label="Daily goal ${e.goal}"><i style="width:${Math.min(100, v / e.goal * 100)}%"></i></div><small>${v >= e.goal ? "Goal hit! Every extra one is a bonus." : `Goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal.toLocaleString()} · ${e.type === "timed" ? fmtDur(e.goal - v) : (e.goal - v).toLocaleString()} to go`}</small>` : "";
+  return `<b>${e.type === "timed" ? fmtDur(v) : v.toLocaleString()}</b><span>${e.type === "timed" ? dw : esc(e.name.toLowerCase()) + " " + dw}</span>${goal}`;
 }
+function entryText(d, x) {
+  const e = exById(x.ex), n = e ? e.name : "Removed exercise";
+  if (x.k === "reps") return (e && e.type === "timed" ? `${n} · ${fmtDur(x.v)}` : `${n} +${x.v.toLocaleString()}`) + (x.note === "earlier" ? " · earlier total" : "");
+  if (x.k === "set") { const s = d.sets.find(s => s.id === x.id); return s ? `${n} · ${setLine(s)}` : `${n} · set`; }
+  const s = d.sessions.find(s => s.id === x.id); return `${n} ✓${s && s.min ? ` · ${s.min} min` : ""}${s && s.note ? ` · ${s.note}` : ""}`;
+}
+const LOG_SHOWN = 30;
 function moveLogHTML() {
-  const d = day(todayKey());
-  const items = d.log.filter(x => x.k === "reps" || x.k === "set" || x.k === "session").slice().reverse().slice(0, 30);
-  if (!items.length) return `<p class="muted">Nothing yet today. Your first tap starts the day's count.</p>`;
-  return `<ul class="log">${items.map(x => {
-    const e = exById(x.ex); const n = e ? e.name : "Removed exercise"; let txt;
-    if (x.k === "reps") txt = e && e.type === "timed" ? `${n} · ${fmtDur(x.v)}` : `${n} +${x.v}`;
-    else if (x.k === "set") { const s = d.sets.find(s => s.id === x.id); txt = s ? `${n} · ${setLine(s)}` : `${n} · set`; }
-    else { const s = d.sessions.find(s => s.id === x.id); txt = `${n} ✓${s && s.min ? ` · ${s.min} min` : ""}${s && s.note ? ` · ${s.note}` : ""}`; }
-    return `<li><span>${esc(txt)}</span><time>${x.t}</time></li>`;
-  }).join("")}</ul>`;
+  const k = moveDay(), d = day(k);
+  const all = d.log.filter(x => MOVE_KINDS.includes(x.k)).slice().reverse(), items = showAllLog ? all : all.slice(0, LOG_SHOWN);
+  if (!items.length) return `<p class="muted">Nothing logged ${esc(dayWord(k))} yet.${k === todayKey() ? " Your first tap starts the day's count." : ""}</p>`;
+  return `<ul class="log">${items.map(x => `<li><button class="logitem" data-act="editentry" data-k="${k}" data-id="${esc(x.id)}" aria-label="Edit: ${esc(entryText(d, x))}"><span>${esc(entryText(d, x))}</span><time>${esc(x.t || "")}</time><span class="logedit" aria-hidden="true">Edit</span></button></li>`).join("")}</ul>
+    ${all.length > items.length ? `<button class="linkbtn" data-act="showalllog">Show all ${all.length} entries</button>` : ""}
+    <p class="note">Tap an entry to change its number or day, or delete it.</p>`;
+}
+/* Which day you're logging to: today by default, one tap for yesterday, a date picker for older days. */
+function dayPickHTML(k, act, inputId) {
+  const t = todayKey(), y = addDays(t, -1), other = k !== t && k !== y;
+  return `<div class="seg dateseg" role="group" aria-label="Day">
+    <button type="button" data-act="${act}" data-k="${t}" aria-pressed="${k === t}">Today</button>
+    <button type="button" data-act="${act}" data-k="${y}" aria-pressed="${k === y}">Yesterday</button>
+    <label class="datebtn${other ? " on" : ""}"><span>${other ? esc(fmtDate(k, { month: "short", day: "numeric" })) : "Older…"}</span><input type="date" id="${inputId}" max="${t}" value="${k}" aria-label="Pick a date"></label></div>`;
+}
+function logBannerHTML() {
+  const t = todayKey(), k = moveDay();
+  return k !== t ? `<div class="dbanner" role="status"><span>📅 Logging to <b>${esc(fmtDate(k))}</b></span><button class="btn small" data-act="logdate" data-k="${t}">Back to today</button></div>` : "";
+}
+function logDateHTML() {
+  const t = todayKey(), k = moveDay(), long = `<b>${esc(fmtDate(k, { weekday: "long", month: "long", day: "numeric" }))}</b>`;
+  const note = k !== t ? `New entries count toward ${long}.`
+    : afterMidnight() ? `It's after midnight. Your day ends at ${hourLabel(dayEndHour())}, so entries still count toward ${long}.` : "";
+  return `<div class="datepick" aria-label="Day to log to">${dayPickHTML(k, "logdate", "logDateIn")}${note ? `<p class="note">${note}</p>` : ""}</div>`;
 }
 function draft(e) {
   if (drafts[e.id]) return drafts[e.id];
@@ -615,15 +702,16 @@ function viewMove() {
   const e = curEx();
   const chips = activeExercises().map(x => `<button class="chip ex" data-act="pickex" data-ex="${esc(x.id)}" aria-pressed="${e && x.id === e.id}">${esc(x.name)}</button>`).join("") + `<button class="chip add" data-act="newex">+ New</button>`;
   if (!e) return `<div class="chips scroll">${chips}</div><p class="muted">Add an exercise to start counting.</p>`;
-  const st = S.settings, style = `style-${st.buttonStyle} color-${st.buttonColor}`;
+  const st = S.settings, style = `style-${st.buttonStyle} color-${st.buttonColor}`, mk = moveDay();
+  const toDay = mk !== todayKey() ? `<span class="bto">to ${esc(fmtDate(mk))}</span>` : "";
   let zone = "";
   if (e.type === "reps") {
-    zone = `<div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="tap" aria-label="Add one ${esc(e.name.toLowerCase())}"><span class="bplus">+1</span><span class="bname">${esc(e.name)}</span></button></div>
+    zone = `<div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="tap" aria-label="Add one ${esc(e.name.toLowerCase())}"><span class="bplus">+1</span><span class="bname">${esc(e.name)}</span>${toDay}</button></div>
       <div class="quick">${st.quick.map(n => `<button class="btn qbtn" data-act="addn" data-n="${n}">+${n}</button>`).join("")}</div>
       <form class="typein" data-form="typein"><label for="typeN" class="vh">Number of ${esc(e.name.toLowerCase())}</label><input id="typeN" type="number" inputmode="numeric" min="1" max="10000" placeholder="Type a number, e.g. 10"><button class="btn" type="submit">Add</button></form>`;
   } else if (e.type === "timed") {
     const running = hold && hold.ex === e.id;
-    zone = `<div class="tapwrap"><button class="big ${style}${running ? " running" : ""}" id="bigBtn" data-act="hold" aria-label="${running ? "Stop and log" : "Start"} ${esc(e.name.toLowerCase())}"><span class="bplus" id="holdTime">${running ? fmtDur((Date.now() - hold.start) / 1000) : "Start"}</span><span class="bname">${running ? "Tap to stop and log" : esc(e.name)}</span></button></div>
+    zone = `<div class="tapwrap"><button class="big ${style}${running ? " running" : ""}" id="bigBtn" data-act="hold" aria-label="${running ? "Stop and log" : "Start"} ${esc(e.name.toLowerCase())}"><span class="bplus" id="holdTime">${running ? fmtDur((Date.now() - hold.start) / 1000) : "Start"}</span><span class="bname">${running ? "Tap to stop and log" : esc(e.name)}</span>${toDay}</button></div>
       <div class="quick">${TIMED_QUICK_SECONDS.map(n => `<button class="btn qbtn" data-act="addn" data-n="${n}">+${n}s</button>`).join("")}</div>
       <form class="typein" data-form="typein"><label for="typeN" class="vh">Seconds</label><input id="typeN" type="number" inputmode="numeric" min="1" max="36000" placeholder="Type seconds, e.g. 45"><button class="btn" type="submit">Add</button></form>`;
   } else if (e.type === "weighted") {
@@ -631,20 +719,22 @@ function viewMove() {
     zone = `<div class="steppers">
       <div class="stepper"><label for="wIn">Weight (${lu()})</label><div><button class="mini" data-act="wstep" data-d="-1" aria-label="Less weight">−</button><input id="wIn" type="number" inputmode="decimal" step="any" min="0" value="${esc(dr.w)}"><button class="mini" data-act="wstep" data-d="1" aria-label="More weight">+</button></div></div>
       <div class="stepper"><label for="rIn">Reps</label><div><button class="mini" data-act="rstep" data-d="-1" aria-label="One less rep">−</button><input id="rIn" type="number" inputmode="numeric" min="1" value="${esc(dr.r)}"><button class="mini" data-act="rstep" data-d="1" aria-label="One more rep">+</button></div></div></div>
-      <div class="tapwrap"><button class="big ${style} wide-ok" id="bigBtn" data-act="logset"><span class="bplus">Log set</span><span class="bname" id="setPreview">${esc(dr.r)} × ${esc(dr.w)} ${lu()}</span></button></div>`;
+      <div class="tapwrap"><button class="big ${style} wide-ok" id="bigBtn" data-act="logset"><span class="bplus">Log set</span><span class="bname" id="setPreview">${esc(dr.r)} × ${esc(dr.w)} ${lu()}</span>${toDay}</button></div>`;
   } else {
     zone = `<div class="steppers"><div class="stepper"><label for="wkMin">Minutes (optional)</label><div><input id="wkMin" type="number" inputmode="numeric" min="0" placeholder="45"></div></div>
       <div class="stepper"><label for="wkNote">Note (optional)</label><div><input id="wkNote" type="text" maxlength="80" placeholder="e.g. legs and core"></div></div></div>
-      <div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="logworkout"><span class="bplus">Done ✓</span><span class="bname">${esc(e.name)}</span></button></div>`;
+      <div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="logworkout"><span class="bplus">Done ✓</span><span class="bname">${esc(e.name)}</span>${toDay}</button></div>`;
   }
   return `<div class="chips scroll" role="group" aria-label="Exercise">${chips}</div>
+    ${logBannerHTML()}
     <div id="levelBox">${levelCard(levelNudge(e))}</div>
     <section class="panel tapzone"><div class="rowsb"><h2>${esc(e.name)}</h2><button class="linkbtn" data-act="editex" data-ex="${esc(e.id)}">Edit</button></div>
+      ${logDateHTML()}
       <div class="todaycount" id="todayCount">${todayCountHTML(e)}</div>${zone}
       <p class="note center">+${nf(e.xp)} XP ${XP_LABEL[e.type].replace("XP ", "")}</p></section>
     <section class="panel"><p class="label">${e.type === "weighted" ? "What to beat" : "Your numbers"}</p><div id="exStats">${exStatsHTML(e)}</div></section>
     ${timerHTML()}
-    <section class="panel"><div class="rowsb"><p class="label">Today's log</p><button class="linkbtn" data-act="undo">Undo last</button></div><div id="moveLog">${moveLogHTML()}</div></section>`;
+    <section class="panel"><div class="rowsb"><p class="label">Log · ${esc(dayTitle(mk))}</p><button class="linkbtn" data-act="undo">Undo last</button></div><div id="moveLog">${moveLogHTML()}</div></section>`;
 }
 function updateMoveLive() {
   const e = curEx(); if (tab !== "move" || !e) return;
@@ -662,12 +752,13 @@ function animateTap(label) {
 }
 function addReps(n, label) {
   const e = curEx(); if (!e || !(n > 0)) return;
-  const k = todayKey(), before = exDone(day(k), e), rs = repStats(e);
-  mutate(() => { const d = dayW(k); d.reps[e.id] = (d.reps[e.id] || 0) + n; d.log.push({ k: "reps", ex: e.id, v: n, t: nowTime() }); }, { rerender: false });
+  const k = moveDay(), before = exDone(day(k), e), rs = repStats(e);
+  mutate(() => { const d = dayW(k); d.log.push({ k: "reps", ex: e.id, v: n, t: nowTime(), id: uid() }); recalcReps(d); }, { rerender: false });
   sfx("tap"); buzz(); animateTap(label || (e.type === "timed" ? "+" + fmtDur(n) : "+" + n));
   const after = before + n;
-  if (e.goal && before < e.goal && after >= e.goal) { sfx("win"); celebrate(); toast(`${e.type === "timed" ? fmtDur(e.goal) : e.goal} ${e.name.toLowerCase()} today. Goal hit!`); }
-  else if (rs.best && before <= rs.best.v && after > rs.best.v) { sfx("win"); toast(`New best day: ${e.type === "timed" ? fmtDur(after) : after} ${e.name.toLowerCase()}!`); }
+  if (e.goal && before < e.goal && after >= e.goal) { sfx("win"); celebrate(); toast(`${e.type === "timed" ? fmtDur(e.goal) : e.goal.toLocaleString()} ${e.name.toLowerCase()} ${dayWord(k)}. Goal hit!`); }
+  else if (rs.best && before <= rs.best.v && after > rs.best.v) { sfx("win"); toast(`New best day: ${e.type === "timed" ? fmtDur(after) : after.toLocaleString()} ${e.name.toLowerCase()}!`); }
+  else if (k !== todayKey() && n > 1) toast(`Added ${e.type === "timed" ? fmtDur(n) : n.toLocaleString()} to ${fmtDate(k)}`);
   updateMoveLive();
 }
 function logSet() {
@@ -675,7 +766,7 @@ function logSet() {
   if (!(w >= 0) || !(r >= 1)) { toast("Enter a weight and at least 1 rep"); return; }
   drafts[e.id] = { w: String(w), r };
   const before = liftStats(e.id), s = { id: uid(), ex: e.id, w: toKg(w), r, t: nowTime() };
-  mutate(() => { const d = dayW(todayKey()); d.sets.push(s); d.log.push({ k: "set", ex: e.id, id: s.id, t: s.t }); }, { rerender: false });
+  mutate(() => { const d = dayW(moveDay()); d.sets.push(s); d.log.push({ k: "set", ex: e.id, id: s.id, t: s.t }); }, { rerender: false });
   sfx("tap"); buzz(); animateTap(`+${r}`);
   const est = r > 1 ? s.w * (1 + r / 30) : s.w;
   if (before.heavy && (s.w > before.heavy.w + 1e-6)) { sfx("big"); celebrate(); toast(`New PB! Heaviest ${e.name.toLowerCase()}: ${setLine(s)}`); }
@@ -686,24 +777,101 @@ function logSet() {
 function logWorkout(minOverride) {
   const e = curEx(), min = minOverride || parseInt(($("#wkMin") || {}).value, 10) || 0, note = (($("#wkNote") || {}).value || "").trim();
   const s = { id: uid(), ex: e.id, min, note, t: nowTime() };
-  mutate(() => { const d = dayW(todayKey()); d.sessions.push(s); d.log.push({ k: "session", ex: e.id, id: s.id, t: s.t }); }, { rerender: false });
-  sfx("win"); buzz(25); animateTap("✓"); toast(`${e.name} done. +${nf(e.xp)} XP`);
+  const k = moveDay();
+  mutate(() => { const d = dayW(k); d.sessions.push(s); d.log.push({ k: "session", ex: e.id, id: s.id, t: s.t }); }, { rerender: false });
+  sfx("win"); buzz(25); animateTap("✓"); toast(`${e.name} done${k !== todayKey() ? " · " + fmtDate(k) : ""}. +${nf(e.xp)} XP`);
   if ($("#wkMin")) $("#wkMin").value = ""; if ($("#wkNote")) $("#wkNote").value = "";
   updateMoveLive();
 }
+/* Remove one exercise entry from a day (and its set or session). Totals are recalculated from what's left. */
+function takeEntry(d, id) {
+  const i = d.log.findIndex(x => x.id === id && MOVE_KINDS.includes(x.k)); if (i < 0) return null;
+  const x = d.log.splice(i, 1)[0]; let obj = null;
+  if (x.k === "set") { obj = d.sets.find(s => s.id === id); d.sets = d.sets.filter(s => s.id !== id); }
+  else if (x.k === "session") { obj = d.sessions.find(s => s.id === id); d.sessions = d.sessions.filter(s => s.id !== id); }
+  recalcReps(d);
+  return { x, obj };
+}
+function putEntry(d, { x, obj }) {
+  d.log.push(x);
+  if (x.k === "set" && obj) d.sets.push(obj); else if (x.k === "session" && obj) d.sessions.push(obj);
+  recalcReps(d);
+}
 function undoMove() {
-  const d = dayW(todayKey());
-  for (let i = d.log.length - 1; i >= 0; i--) {
-    const x = d.log[i]; if (!["reps", "set", "session"].includes(x.k)) continue;
-    mutate(() => {
-      if (x.k === "reps") { d.reps[x.ex] = Math.max(0, (d.reps[x.ex] || 0) - x.v); if (!d.reps[x.ex]) delete d.reps[x.ex]; }
-      else if (x.k === "set") d.sets = d.sets.filter(s => s.id !== x.id);
-      else d.sessions = d.sessions.filter(s => s.id !== x.id);
-      d.log.splice(i, 1);
-    });
-    toast("Undone"); return;
+  const k = moveDay(), last = day(k).log.filter(x => MOVE_KINDS.includes(x.k)).pop();
+  if (!last) { toast(`Nothing to undo ${dayWord(k)}`); return; }
+  mutate(() => { takeEntry(dayW(k), last.id); });
+  toast("Undone");
+}
+
+/* Edit an entry: change its number, move it to another day, or delete it. Both days are recalculated. */
+function entrySheet(k, id) {
+  const d = day(k), x = d.log.find(x => x.id === id && MOVE_KINDS.includes(x.k));
+  if (!x) { toast("That entry is gone"); render(); return; }
+  const e = exById(x.ex), name = e ? e.name : "Removed exercise";
+  let fields;
+  if (x.k === "reps") {
+    const timed = e && e.type === "timed";
+    fields = `<div class="field"><label for="entN">${timed ? "Seconds" : "Number"}</label><input id="entN" type="number" inputmode="numeric" min="1" max="${timed ? 36000 : 10000}" value="${x.v}" required></div>`;
+  } else if (x.k === "set") {
+    const s = d.sets.find(s => s.id === id) || { w: 0, r: 1 };
+    fields = `<div class="two"><div class="field"><label for="entW">Weight (${lu()})</label><input id="entW" type="number" inputmode="decimal" step="any" min="0" value="${n1(fromKg(s.w))}" required></div>
+      <div class="field"><label for="entR">Reps</label><input id="entR" type="number" inputmode="numeric" min="1" value="${s.r}" required></div></div>`;
+  } else {
+    const s = d.sessions.find(s => s.id === id) || {};
+    fields = `<div class="two"><div class="field"><label for="entMin">Minutes</label><input id="entMin" type="number" inputmode="numeric" min="0" value="${s.min || ""}" placeholder="Optional"></div>
+      <div class="field"><label for="entNote">Note</label><input id="entNote" type="text" maxlength="80" value="${esc(s.note || "")}" placeholder="Optional"></div></div>`;
   }
-  toast("Nothing to undo today");
+  openSheet(`<form data-form="entry" data-k="${k}" data-id="${esc(id)}"><h2>Edit entry · ${esc(name)}</h2>
+    <p class="note">${x.t ? `Logged at ${esc(x.t)}` : "Logged before entry times were kept"}. Counts toward ${esc(fmtDate(k, { weekday: "long", month: "long", day: "numeric" }))}.</p>
+    ${fields}
+    <div class="field"><span class="flabel">Day</span><div id="entDays">${dayPickHTML(k, "entdate", "entDate")}</div>
+      <p class="note" id="entDayNote">Counts toward <b>${esc(fmtDate(k, { weekday: "long", month: "long", day: "numeric" }))}</b>.</p></div>
+    <div class="row2"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-act="closesheet">Cancel</button></div>
+    <button class="btn danger" type="button" data-act="delentry" data-k="${k}" data-id="${esc(id)}">Delete entry</button></form>`);
+}
+function setEntryDay(nk) {
+  const t = todayKey(), f = $('form[data-form="entry"]'); if (!f) return;
+  if (!nk || nk > t) { toast("You can't log to a future day"); nk = f.dataset.nk || f.dataset.k; }
+  f.dataset.nk = nk;
+  $("#entDays").innerHTML = dayPickHTML(nk, "entdate", "entDate");
+  $("#entDayNote").innerHTML = `${nk !== f.dataset.k ? "Moves to" : "Counts toward"} <b>${esc(fmtDate(nk, { weekday: "long", month: "long", day: "numeric" }))}</b>.`;
+}
+function saveEntry(f) {
+  const k = f.dataset.k, id = f.dataset.id, nk = f.dataset.nk || k;
+  if (nk > todayKey()) { toast("You can't log to a future day"); return; }
+  const src = day(k), x = src.log.find(x => x.id === id && MOVE_KINDS.includes(x.k));
+  if (!x) { closeSheet(); toast("That entry is gone"); render(); return; }
+  const e = exById(x.ex);
+  let upd;
+  if (x.k === "reps") {
+    const n = parseInt($("#entN").value, 10), max = e && e.type === "timed" ? 36000 : 10000;
+    if (!(n >= 1) || n > max) { toast(`Enter a number from 1 to ${max.toLocaleString()}`); return; }
+    upd = (ent) => { ent.x.v = n; };
+  } else if (x.k === "set") {
+    const w = parseFloat($("#entW").value), r = parseInt($("#entR").value, 10);
+    if (!(w >= 0) || !(r >= 1)) { toast("Enter a weight and at least 1 rep"); return; }
+    upd = (ent) => { if (ent.obj) { ent.obj.w = toKg(w); ent.obj.r = r; } };
+  } else {
+    const min = Math.max(0, parseInt($("#entMin").value, 10) || 0), note = $("#entNote").value.trim();
+    upd = (ent) => { if (ent.obj) { ent.obj.min = min; ent.obj.note = note; } };
+  }
+  closeSheet();
+  mutate(() => {
+    const d = dayW(k);
+    if (nk === k) { // same day: edit in place
+      const lx = d.log.find(y => y.id === id && MOVE_KINDS.includes(y.k)); if (!lx) return;
+      upd({ x: lx, obj: lx.k === "set" ? d.sets.find(s => s.id === id) : lx.k === "session" ? d.sessions.find(s => s.id === id) : null });
+      recalcReps(d);
+    } else { const ent = takeEntry(d, id); if (!ent) return; upd(ent); putEntry(dayW(nk), ent); }
+  });
+  toast(nk !== k ? `Moved to ${fmtDate(nk)}` : "Saved");
+}
+function deleteEntry(k, id) {
+  if (!confirm("Delete this entry? This can't be undone.")) return;
+  closeSheet();
+  mutate(() => { takeEntry(dayW(k), id); });
+  toast("Entry deleted");
 }
 
 /* timers */
@@ -750,7 +918,8 @@ function viewWins() {
       ${Object.entries(mt).map(([id, m]) => byType(id).length ? `<div><p class="sublabel">${m.label === "Appreciate" ? "Appreciated" : m.label + (byType(id).length > 1 ? (id === "loss" ? "es" : "s") : "")}</p><ul class="moments">${byType(id).map(x => `<li><span class="mic ${id}">${m.icon}</span><span>${esc(x.text)}</span><button class="x" data-act="delmoment" data-id="${esc(x.id)}" aria-label="Delete">×</button></li>`).join("")}</ul></div>` : "").join("")}
     </section>
     <section class="panel"><label class="switchrow"><span><b>Rest day</b><small>Doesn't break streaks. Nudges ease off.</small></span><input type="checkbox" class="sw" data-act="rest" data-date="${k}" ${d.rest ? "checked" : ""}></label>
-      ${moveSummary(d).length ? `<p class="movesum">💪 ${esc(moveSummary(d).join(" · "))}</p>` : ""}</section>`;
+      ${moveSummary(d).length ? `<p class="movesum">💪 ${esc(moveSummary(d).join(" · "))}</p>` : ""}
+      <button class="btn ghostbtn" data-act="goex" data-date="${k}">${moveSummary(d).length ? "See or edit exercise" : "Log exercise"}${k !== t ? " for " + esc(fmtDate(k)) : ""}</button></section>`;
 }
 function toggleTop3(k, i) {
   const d0 = day(k); if (!d0.top3[i].text.trim()) { toast("Write it in first"); const el = document.querySelector(`[data-top3="${i}"]`); if (el) el.focus(); return; }
@@ -845,7 +1014,7 @@ function medalsHTML() {
   }).join("")}</div>`).join("");
 }
 function planHTML() {
-  const st = new Date(PLAN_START + "T00:00"), nd = new Date(); nd.setHours(0, 0, 0, 0);
+  const st = new Date(PLAN_START + "T00:00"), nd = kdate(todayKey()); nd.setHours(0, 0, 0, 0);
   const dd = Math.floor((nd - st) / 864e5), wk = dd < 0 ? 0 : Math.floor(dd / 7) + 1;
   const ws = dkey(new Date(st.getTime() + Math.max(0, wk - 1) * 7 * 864e5));
   let lift = 0, tilt = 0, keto = 0, burp = 0, dry = 0, logged = 0;
@@ -888,6 +1057,7 @@ function settingsHTML() {
   const seg = (key, opts) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button data-act="set" data-k="${key}" data-v="${v}" aria-pressed="${s[key] === v}">${l}</button>`).join("")}</div>`;
   const tog = (key, label, hint) => `<label class="switchrow"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ""}</span><input type="checkbox" class="sw" data-act="settog" data-k="${key}" ${s[key] ? "checked" : ""}></label>`;
   return `<div class="field"><label for="setName">Your name (for the greeting)</label><input id="setName" type="text" maxlength="30" value="${esc(s.name)}" placeholder="Optional"></div>
+    <div class="field"><label for="setDayEnd">My day ends at</label><select id="setDayEnd">${Array.from({ length: MAX_DAY_END_HOUR + 1 }, (_, h) => `<option value="${h}" ${s.dayEndHour === h ? "selected" : ""}>${h === 0 ? "Midnight" : h + ":00 am"}</option>`).join("")}</select><small class="note">Anything you log before this time counts toward the day before, so late nights stay on the right day.</small></div>
     <div class="field"><span class="flabel">Lifting weights in</span>${seg("unit", [["lb", "lb"], ["kg", "kg"]])}</div>
     <div class="field"><span class="flabel">Body weight in</span>${seg("bodyUnit", [["kg", "kg"], ["lb", "lb"]])}</div>
     <div class="field"><label for="setQuick">Quick buttons (up to ${MAX_QUICK_BUTTONS}, separated by commas)</label><input id="setQuick" type="text" inputmode="numeric" value="${esc(s.quick.join(", "))}"></div>
@@ -908,7 +1078,8 @@ function backupHTML() {
     <div class="row2"><button class="btn primary" data-act="export">Export backup</button><button class="btn" data-act="import">Import backup</button></div>
     <p class="note">Export saves everything as one JSON file. On iPhone, choose <b>Save to Files</b> and pick iCloud Drive. Import replaces the data on this device with the file you choose.</p>
     ${hasUndo ? `<button class="linkbtn" data-act="undoimport">Undo the last import</button>` : ""}
-    ${storageOK ? "" : `<p class="warn">This browser is blocking storage, so data may not be kept. Export often.</p>`}`;
+    ${storageOK ? "" : `<p class="warn">This browser is blocking storage, so data may not be kept. Export often.</p>`}
+    ${loadFailed ? `<p class="warn">The data saved on this device couldn't be read, so nothing is being saved over it. Import a backup to carry on.</p>` : ""}`;
 }
 function viewMore() {
   const sec = (id, title, body, open) => `<details class="panel sect" id="${id}" data-sec="${id}" ${openSection === id || open ? "open" : ""}><summary><h2>${title}</h2></summary><div class="sectbody">${body}</div></details>`;
@@ -1012,7 +1183,7 @@ function importData(file) {
     if (!confirm(`Restore the backup from ${when}?\n\nIt has ${n} ${plural(n, "day")} of data and will replace what's on this device now. You can undo this once from More > Backup.`)) return;
     try { localStorage.setItem(PRE_IMPORT_KEY, JSON.stringify(S)); } catch (e) {}
     delete data.exportedAt;
-    S = normalize(data); S.meta.lastOpenDay = todayKey(); if (!S.meta.lastBackup) S.meta.lastBackup = new Date().toISOString();
+    S = normalize(data); loadFailed = false; S.meta.lastOpenDay = todayKey(); if (!S.meta.lastBackup) S.meta.lastBackup = new Date().toISOString();
     save(true); applyTheme(); toast("Backup restored"); render();
   };
   r.readAsText(file);
@@ -1035,13 +1206,20 @@ function applyTheme() {
    EVENTS
    ===================================================================== */
 document.addEventListener("click", ev => {
+  // Desktop browsers only open the calendar from its icon; open it from anywhere on the field.
+  if (ev.target.type === "date" && ev.target.showPicker && matchMedia("(pointer: fine)").matches) { try { ev.target.showPicker(); } catch (e) {} }
   const b = ev.target.closest("[data-act]"); if (!b || b.tagName === "INPUT") return;
   if (b.closest("#sheet") && ev.target === $("#sheet")) return;
   const a = b.dataset.act, ds = b.dataset;
   switch (a) {
     case "tab": go(ds.tab); break;
     case "gowins": go("wins", { date: ds.date }); break;
-    case "goex": go("move", { ex: ds.ex }); break;
+    case "goex": go("move", { ex: ds.ex, date: ds.date }); break;
+    case "logdate": logDate = ds.k < todayKey() ? ds.k : null; showAllLog = false; render(); break;
+    case "showalllog": showAllLog = true; updateMoveLive(); break;
+    case "editentry": entrySheet(ds.k, ds.id); break;
+    case "entdate": setEntryDay(ds.k); break;
+    case "delentry": deleteEntry(ds.k, ds.id); break;
     case "gobreathe": go("breathe"); break;
     case "export": exportData(); break;
     case "import": $("#importFile").value = ""; $("#importFile").click(); break;
@@ -1055,7 +1233,7 @@ document.addEventListener("click", ev => {
     case "rstep": { const i = $("#rIn"); i.value = Math.max(1, (parseInt(i.value, 10) || 0) + +ds.d); syncSetPreview(); break; }
     case "logset": logSet(); break;
     case "logworkout": logWorkout(); break;
-    case "delset": mutate(() => { const d = dayW(todayKey()); d.sets = d.sets.filter(s => s.id !== ds.id); d.log = d.log.filter(x => x.id !== ds.id); }); break;
+    case "delset": mutate(() => { takeEntry(dayW(moveDay()), ds.id); }); break;
     case "undo": undoMove(); break;
     case "editex": exerciseSheet(ds.ex); break;
     case "newex": exerciseSheet(null); break;
@@ -1094,6 +1272,13 @@ document.addEventListener("change", ev => {
   if (ds.act === "rest") { const k = ds.date, on = t.checked; mutate(() => { dayW(k).rest = on; }); toast(on ? "Rest day. Streaks are safe." : "Rest day off"); return; }
   if (ds.act === "settog") { S.settings[ds.k] = t.checked; save(); openSection = "s-settings"; render(); return; }
   if (t.id === "setName") { S.settings.name = t.value.trim(); save(); return; }
+  if (t.id === "logDateIn") {
+    const v = t.value; if (!v) return;
+    if (v > todayKey()) { toast("You can't log to a future day"); render(); return; }
+    logDate = v < todayKey() ? v : null; showAllLog = false; render(); return;
+  }
+  if (t.id === "entDate") { if (t.value) setEntryDay(t.value); return; }
+  if (t.id === "setDayEnd") { S.settings.dayEndHour = +t.value; save(); openSection = "s-settings"; render(); toast(`Your day now ends at ${hourLabel(S.settings.dayEndHour)}`); return; }
   if (t.id === "setQuick") {
     const q = t.value.split(/[^0-9]+/).map(Number).filter(n => n > 0 && n <= 1000).slice(0, MAX_QUICK_BUTTONS);
     S.settings.quick = q.length ? q : DEFAULT_QUICK_AMOUNTS.slice(); save(); t.value = S.settings.quick.join(", "); toast("Quick buttons: " + S.settings.quick.map(n => "+" + n).join(" ")); return;
@@ -1113,6 +1298,7 @@ document.addEventListener("keydown", ev => {
 });
 document.addEventListener("submit", ev => {
   const f = ev.target, kind = f.dataset.form; if (!kind) return; ev.preventDefault();
+  if (kind === "entry") { saveEntry(f); return; }
   if (kind === "typein") { const i = $("#typeN"), n = parseInt(i.value, 10); if (!(n > 0)) { toast("Type a number first"); return; } addReps(n); i.value = ""; i.blur(); return; }
   if (kind === "extra") { const i = $("#extraIn"), v = i.value.trim(); if (!v) return; mutate(() => { dayW(winsDate).extras.push({ id: uid(), text: v, done: false }); }); setTimeout(() => $("#extraIn") && $("#extraIn").focus(), 20); return; }
   if (kind === "moment") { const i = $("#momentIn"), v = i.value.trim(); if (!v) return; mutate(() => { dayW(winsDate).moments.push({ id: uid(), type: momentType, text: v, t: nowTime() }); }); if (momentType === "win") sfx("win"); toast(momentType === "win" ? "Win logged. Nice." : momentType === "loss" ? "Logged. Every loss teaches something." : "Logged with gratitude."); setTimeout(() => $("#momentIn") && $("#momentIn").focus(), 20); return; }
@@ -1156,6 +1342,7 @@ function afterRender() {
 /* ---------- resume and morning logic ---------- */
 function onResume() {
   const t = todayKey();
+  if (logDate && Date.now() - hiddenAt > BACKDATE_KEEP_MINUTES * 60000) { logDate = null; if (tab === "move") render(); }
   if (t !== renderedDay && !breath) {
     if (S.meta.lastOpenDay !== t) { S.meta.lastOpenDay = t; tab = "today"; shuffleN = 0; save(); }
     winsDate = t; render();
@@ -1169,6 +1356,7 @@ function init() {
   else tab = S.settings.lastTab || "today";
   save(true);
   render();
+  if (loadFailed) toast("Couldn't read your saved data. Nothing has been changed. See More > Backup.");
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
 }
