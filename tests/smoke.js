@@ -42,8 +42,8 @@ const V1 = {
 const NOON = new Date("2026-11-14T15:00:00Z"); // Sat Nov 14, 3pm (browser runs in UTC)
 const LATE = new Date("2026-11-15T01:30:00Z"); // Sun Nov 15, 1:30am: still Sat Nov 14 with a 3am day end
 
-async function newPage(browser, device = "iPhone 13", time = NOON) {
-  const ctx = await browser.newContext({ ...devices[device], timezoneId: "UTC", serviceWorkers: "block", acceptDownloads: true });
+async function newPage(browser, device = "iPhone 13", time = NOON, colorScheme = "light") {
+  const ctx = await browser.newContext({ ...devices[device], timezoneId: "UTC", serviceWorkers: "block", acceptDownloads: true, colorScheme });
   const page = await ctx.newPage();
   page.on("pageerror", e => { console.log("  PAGE ERROR " + e.message); failures++; });
   page.on("dialog", d => d.accept());
@@ -64,7 +64,7 @@ const snapshot = page => page.evaluate(() => ({
 const reps = (page, k, ex) => page.evaluate(([k, ex]) => (S.days[k] && S.days[k].reps[ex]) || 0, [k, ex]);
 const noHScroll = page => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
 // the test clock is frozen, so let toasts and animations finish before each screenshot
-const shot = async (page, name) => { try { await page.clock.runFor(4000); } catch (e) {} return page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: false }); };
+const shot = async (page, name) => { try { await page.clock.runFor(4000); } catch (e) {} return page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: false, animations: "disabled" }); };
 const tab = (page, name) => page.click(`.tabbtn[data-tab="${name}"]`);
 
 (async () => {
@@ -228,13 +228,15 @@ const tab = (page, name) => page.click(`.tabbtn[data-tab="${name}"]`);
   ok(await lp.evaluate(() => todayKey()) === "2026-11-15", "with day end at midnight it's Nov 15");
   await lp.context().close();
 
-  console.log("Small iPhone (SE) layout");
-  const { page: se } = await newPage(browser, "iPhone SE");
+  console.log("Small iPhone (SE) layout, dark mode");
+  const { page: se } = await newPage(browser, "iPhone SE", NOON, "dark");
   await seed(se, BASE, V1);
   for (const t of ["today", "move", "wins", "more"]) { await tab(se, t); ok(await noHScroll(se), `no sideways scrolling on ${t} (SE)`); }
   await tab(se, "move");
   await se.click('.datepick [data-act="logdate"]:has-text("Yesterday")');
   await shot(se, "se-move-yesterday");
+  await se.click(".logitem >> nth=0");
+  await shot(se, "se-edit-entry");
   await se.context().close();
 
   await browser.close();

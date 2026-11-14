@@ -879,7 +879,7 @@ function entrySheet(k, id) {
     <div class="field"><span class="flabel">Day</span><div id="entDays">${dayPickHTML(k, "entdate", "entDate")}</div>
       <p class="note" id="entDayNote">Counts toward <b>${esc(fmtDate(k, { weekday: "long", month: "long", day: "numeric" }))}</b>.</p></div>
     <div class="row2"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-act="closesheet">Cancel</button></div>
-    <button class="btn danger" type="button" data-act="delentry" data-k="${k}" data-id="${esc(id)}">Delete entry</button></form>`);
+    <button class="btn danger" type="button" data-act="delentry" data-k="${k}" data-id="${esc(id)}">Delete entry</button></form>`, false);
 }
 function setEntryDay(nk) {
   const t = todayKey(), f = $('form[data-form="entry"]'); if (!f) return;
@@ -1171,9 +1171,9 @@ function undoHabit() {
 }
 
 /* ---------- sheets (add/edit exercise, add habit) ---------- */
-function openSheet(html) {
+function openSheet(html, focus = true) {
   const s = $("#sheet"); s.innerHTML = `<div class="sheetbox" role="dialog" aria-modal="true">${html}</div>`; s.hidden = false; document.body.classList.add("noscroll");
-  const f = s.querySelector("input"); if (f) setTimeout(() => f.focus(), 50);
+  const f = focus && s.querySelector("input"); if (f) setTimeout(() => f.focus(), 50);
 }
 function closeSheet() { const s = $("#sheet"); s.hidden = true; s.innerHTML = ""; document.body.classList.remove("noscroll"); }
 function exerciseSheet(id) {
