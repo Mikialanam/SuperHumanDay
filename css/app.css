@@ -379,3 +379,8 @@ details.panel:not([open]) { gap: 0; }
   .brand { font-size: .95rem; gap: 8px; }
   .chipbar { width: 32px; }
 }
+.typein.bigtype input { min-height: 60px; font-size: 1.4rem; font-weight: 700; text-align: center; }
+.typein.bigtype .btn { min-height: 60px; min-width: 96px; }
+.counter { min-width: 0; }
+.stepsbox .btn.small { min-height: 40px; padding: 6px 12px; }
+.stepsbox b { padding-left: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

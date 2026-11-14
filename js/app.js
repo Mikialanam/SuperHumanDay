@@ -19,11 +19,15 @@ const SUPERHUMAN_DAY_TOP3_NEEDED = 3;// how many top-3 items must be written and
 const EXTRA_DONE_XP = 5;             // per extra ticked done
 const MOMENT_XP = 2;                 // per win, loss or appreciation logged
 const BREATH_XP_PER_MINUTE = 5;
-const STEPS_XP_PER_1000 = 10;
+const STEPS_XP_PER_1000 = 10;         // XP for steps (the Steps exercise uses this unless you change it)
 const WEIGH_IN_XP = 5;
 const BEER_FREE_DAY_XP = 30;         // past logged days with no beers
 const LOW_BEER_DAY_XP = 20;          // past logged days with LOW_BEER_LIMIT or fewer
 const LOW_BEER_LIMIT = 2;
+
+// Number entry
+const MAX_ENTRY_NUMBER = 100000;      // largest number in one entry (reps, steps …)
+const MAX_ENTRY_SECONDS = 36000;      // largest timed entry, in seconds (10 hours)
 
 // Buttons and timers
 const DEFAULT_QUICK_AMOUNTS = [5, 10]; // quick buttons next to the big button (changeable in Settings)
@@ -55,6 +59,8 @@ const RANKS = ["Spark", "Starter", "Mover", "Builder", "Climber", "Steady", "Str
 // xp: XP per rep, per second (timed) or per session (workout). goal: optional daily target.
 const DEFAULT_EXERCISES = [
   { id: "burpees", name: "Burpees", type: "reps", xp: 2, goal: 50, nudge: true, medal: "Burpee Machine", tiers: [50, 250, 750, 2000] },
+  // tap: false hides the big +1 button (you type the number from your phone instead). quick: its own quick buttons.
+  { id: "steps", name: "Steps", type: "reps", xp: STEPS_XP_PER_1000 / 1000, goal: 8000, unit: "steps", tap: false, quick: [1000, 5000], medal: "Trailblazer", tiers: [50000, 250000, 1000000, 5000000] },
   { id: "pushups", name: "Push-ups", type: "reps", xp: 1, medal: "Push Power", tiers: [100, 500, 1500, 4000] },
   { id: "squats", name: "Squats", type: "reps", xp: 1, medal: "Squat Squad", tiers: [100, 500, 1500, 4000] },
   { id: "negatives", name: "Pull-up negatives", type: "reps", xp: 5, medal: "Slow Lowerer", tiers: [15, 60, 200, 500] },
@@ -144,7 +150,7 @@ const plural = (n, one, many) => n === 1 ? one : (many || one + "s");
 
 /* ---------- storage ---------- */
 function blankDay() {
-  return { reps: {}, sets: [], sessions: [], log: [], top3: [0, 1, 2].map(() => ({ text: "", done: false })), extras: [], moments: [], breath: [], rest: false, habits: {}, steps: 0, weight: null, waist: null, beers: 0 };
+  return { reps: {}, sets: [], sessions: [], log: [], top3: [0, 1, 2].map(() => ({ text: "", done: false })), extras: [], moments: [], breath: [], rest: false, habits: {}, weight: null, waist: null, beers: 0 };
 }
 function normDay(d) {
   const b = blankDay();
@@ -161,7 +167,7 @@ function recalcReps(d) {
    Version 1 kept a running total per exercise plus a log without ids. Now every exercise entry has an id so it
    can be edited, moved to another day or deleted. Totals are kept exactly: if an old total doesn't match its
    entries, an "earlier" entry makes up the difference. */
-function migrateDay(d) {
+function migrateDay(d, stepsId) {
   if (!Array.isArray(d.log)) d.log = [];
   if (!Array.isArray(d.sets)) d.sets = [];
   if (!Array.isArray(d.sessions)) d.sessions = [];
@@ -184,13 +190,33 @@ function migrateDay(d) {
     }
   }
   d.log = d.log.filter(x => x.k !== "reps" || x.v > 0);
+  // Version 1 kept steps as one number under More > Habits. They become an entry on the Steps exercise.
+  if (d.steps !== undefined) {
+    const n = Math.round(Number(d.steps) || 0);
+    if (n > 0 && stepsId) d.log.unshift({ k: "reps", ex: stepsId, v: n, t: "", id: uid(), note: "habits" });
+    if (n <= 0 || stepsId) { delete d.steps; d.log = d.log.filter(x => !(x.k === "num" && x.id === "steps")); }
+  }
   recalcReps(d);
   return d;
+}
+/* Make sure there's a Steps exercise. If you already made your own "Steps", that one is used on the Move page;
+   a hidden built-in one only holds steps that were logged under Habits in version 1 (so their XP stays the same). */
+function ensureSteps(s) {
+  const own = s.exercises.find(e => e.id !== "steps" && !e.archived && /^\s*steps?\s*$/i.test(e.name || ""));
+  if (own && own.tap === undefined) { own.tap = false; if (!own.quick) own.quick = [1000, 5000]; if (!own.unit) own.unit = "steps"; }
+  if (s.exercises.some(e => e.id === "steps")) return "steps";
+  const legacy = Object.values(s.days).some(d => d && Number(d.steps) > 0);
+  if (own && !legacy) return null;
+  const ex = clone(DEFAULT_EXERCISES.find(e => e.id === "steps"));
+  if (own) ex.archived = true;
+  const i = s.exercises.findIndex(e => e.id === "burpees");
+  s.exercises.splice(i + 1, 0, ex);
+  return "steps";
 }
 function dayHasData(d) {
   return Object.values(d.reps).some(v => v > 0) || d.sets.length || d.sessions.length || d.top3.some(t => t.text.trim()) ||
     d.extras.length || d.moments.length || d.breath.length || d.rest || Object.values(d.habits).some(v => v) ||
-    d.steps || d.weight || d.waist || d.beers;
+    d.weight || d.waist || d.beers;
 }
 function freshState() {
   return {
@@ -210,7 +236,8 @@ function normalize(s) {
   if (!Array.isArray(s.exercises) || !s.exercises.length) s.exercises = f.exercises;
   if (!Array.isArray(s.habits)) s.habits = f.habits;
   if (!s.days || typeof s.days !== "object") s.days = {};
-  for (const k of Object.keys(s.days)) { if (!isDayKey(k) || !s.days[k] || typeof s.days[k] !== "object") delete s.days[k]; else migrateDay(normDay(s.days[k])); }
+  const stepsId = ensureSteps(s);
+  for (const k of Object.keys(s.days)) { if (!isDayKey(k) || !s.days[k] || typeof s.days[k] !== "object") delete s.days[k]; else migrateDay(normDay(s.days[k]), stepsId); }
   s.meta = Object.assign(f.meta, s.meta || {});
   return s;
 }
@@ -246,6 +273,7 @@ const day = k => S.days[k] ? normDay(S.days[k]) : blankDay();          // read-o
 const dayW = k => S.days[k] ? normDay(S.days[k]) : (S.days[k] = blankDay()); // for writing
 const exById = id => S.exercises.find(e => e.id === id);
 const activeExercises = () => S.exercises.filter(e => !e.archived);
+const stepsEx = () => S.exercises.find(e => !e.archived && (e.id === "steps" || /^\s*steps?\s*$/i.test(e.name || "")));
 const curEx = () => { const e = exById(S.settings.lastExercise); return e && !e.archived ? e : activeExercises()[0]; };
 
 /* ---------- units ---------- */
@@ -270,7 +298,6 @@ function dayXP(d, k) {
   for (const s of d.sets) { const e = exById(s.ex); if (e) x += s.r * e.xp; }
   for (const s of d.sessions) { const e = exById(s.ex); if (e) x += e.xp; }
   for (const h of S.habits) { const v = d.habits[h.id]; if (v) x += h.kind === "check" ? h.xp : v * h.xp; }
-  x += Math.floor((d.steps || 0) / 1000) * STEPS_XP_PER_1000;
   if (d.weight) x += WEIGH_IN_XP;
   x += d.breath.reduce((a, b) => a + b.sec, 0) / 60 * BREATH_XP_PER_MINUTE;
   x += d.top3.filter(t => t.text.trim() && t.done).length * TOP3_ITEM_XP;
@@ -327,7 +354,7 @@ function computeTotals() {
 }
 function medalDefs() {
   const out = [];
-  for (const e of activeExercises()) out.push({ key: "ex:" + e.id, name: e.medal || e.name, tiers: e.tiers || defaultTiers(e.type), unit: e.type === "workout" ? "workouts" : e.type === "timed" ? "" : "reps", dur: e.type === "timed", group: "Move" });
+  for (const e of activeExercises()) out.push({ key: "ex:" + e.id, name: e.medal || e.name, tiers: e.tiers || defaultTiers(e.type), unit: e.unit || (e.type === "workout" ? "workouts" : e.type === "timed" ? "" : "reps"), dur: e.type === "timed", group: "Move" });
   out.push({ key: "super", name: "Superhuman", tiers: [1, 7, 30, 100], unit: "Superhuman Days", group: "Days" });
   out.push({ key: "best", name: "On Fire", tiers: [3, 7, 30, 100], unit: "day best streak", group: "Days" });
   out.push({ key: "breath", name: "Calm Breather", tiers: [10, 60, 300, 1000], unit: "min breathing", group: "Days" });
@@ -490,7 +517,7 @@ function moveSummary(d) {
     if (e.type === "timed") parts.push(`${fmtDur(v)} ${e.name.toLowerCase()}`);
     else if (e.type === "weighted") { const n = d.sets.filter(s => s.ex === e.id).length; parts.push(`${e.name}: ${n} ${plural(n, "set")}`); }
     else if (e.type === "workout") parts.push(e.name + (v > 1 ? ` ×${v}` : ""));
-    else parts.push(`${v} ${e.name.toLowerCase()}`);
+    else parts.push(`${v.toLocaleString()} ${e.name.toLowerCase()}`);
   }
   const b = d.breath.reduce((a, x) => a + x.sec, 0); if (b) parts.push(`${Math.max(1, Math.round(b / 60))} min breathing`);
   return parts;
@@ -605,15 +632,16 @@ function repStats(e) {
   }
   return { best, last, total };
 }
+const xpText = e => e.xp > 0 && e.xp < 0.1 ? `+${nf(e.xp * 1000)} XP per 1,000 ${esc(e.unit || exUnit(e))}` : `+${nf(e.xp)} XP ${XP_LABEL[e.type].replace("XP ", "")}`;
 const exUnit = (e, n = 2) => e.type === "workout" ? plural(n, "workout") : e.type === "timed" ? "" : e.type === "weighted" ? plural(n, "rep") : e.name.toLowerCase();
 function levelNudge(e) {
   const li = levelInfo(totalXP());
   if (!e || !e.xp) return `${li.toNext.toLocaleString()} XP to level ${li.level + 1}`;
-  const n = Math.ceil(li.toNext / e.xp);
+  const n = Math.ceil(li.toNext / e.xp), ns = n.toLocaleString();
   if (e.type === "timed") return `${fmtDur(n)} more ${e.name.toLowerCase()} to level ${li.level + 1}`;
-  if (e.type === "workout") return `${n} more ${plural(n, "workout")} to level ${li.level + 1}`;
-  if (e.type === "weighted") return `${n} more ${e.name.toLowerCase()} ${plural(n, "rep")} to level ${li.level + 1}`;
-  return `${n} more ${e.name.toLowerCase()} to level ${li.level + 1}`;
+  if (e.type === "workout") return `${ns} more ${plural(n, "workout")} to level ${li.level + 1}`;
+  if (e.type === "weighted") return `${ns} more ${e.name.toLowerCase()} ${plural(n, "rep")} to level ${li.level + 1}`;
+  return `${ns} more ${e.name.toLowerCase()} to level ${li.level + 1}`;
 }
 function setLine(s) { return `${s.r} × ${wtxt(s.w)} ${lu()}`; }
 function exStatsHTML(e) {
@@ -706,14 +734,16 @@ function viewMove() {
   const toDay = mk !== todayKey() ? `<span class="bto">to ${esc(fmtDate(mk))}</span>` : "";
   let zone = "";
   if (e.type === "reps") {
-    zone = `<div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="tap" aria-label="Add one ${esc(e.name.toLowerCase())}"><span class="bplus">+1</span><span class="bname">${esc(e.name)}</span>${toDay}</button></div>
-      <div class="quick">${st.quick.map(n => `<button class="btn qbtn" data-act="addn" data-n="${n}">+${n}</button>`).join("")}</div>
-      <form class="typein" data-form="typein"><label for="typeN" class="vh">Number of ${esc(e.name.toLowerCase())}</label><input id="typeN" type="number" inputmode="numeric" min="1" max="10000" placeholder="Type a number, e.g. 10"><button class="btn" type="submit">Add</button></form>`;
+    const quick = (Array.isArray(e.quick) && e.quick.length ? e.quick : st.quick).map(n => `<button class="btn qbtn" data-act="addn" data-n="${n}">+${n.toLocaleString()}</button>`).join("");
+    const typein = `<form class="typein${e.tap === false ? " bigtype" : ""}" data-form="typein"><label for="typeN" class="vh">Number of ${esc(e.name.toLowerCase())}</label><input id="typeN" type="number" inputmode="numeric" min="1" max="${MAX_ENTRY_NUMBER}" placeholder="${e.tap === false ? `${esc(e.name)}, e.g. 8200` : "Type a number, e.g. 10"}"><button class="btn${e.tap === false ? " primary" : ""}" type="submit">Add${e.tap === false && toDay ? ` to ${esc(fmtDate(mk, { month: "short", day: "numeric" }))}` : ""}</button></form>`;
+    zone = e.tap === false ? `${typein}<div class="quick">${quick}</div>`
+      : `<div class="tapwrap"><button class="big ${style}" id="bigBtn" data-act="tap" aria-label="Add one ${esc(e.name.toLowerCase())}"><span class="bplus">+1</span><span class="bname">${esc(e.name)}</span>${toDay}</button></div>
+      <div class="quick">${quick}</div>${typein}`;
   } else if (e.type === "timed") {
     const running = hold && hold.ex === e.id;
     zone = `<div class="tapwrap"><button class="big ${style}${running ? " running" : ""}" id="bigBtn" data-act="hold" aria-label="${running ? "Stop and log" : "Start"} ${esc(e.name.toLowerCase())}"><span class="bplus" id="holdTime">${running ? fmtDur((Date.now() - hold.start) / 1000) : "Start"}</span><span class="bname">${running ? "Tap to stop and log" : esc(e.name)}</span>${toDay}</button></div>
       <div class="quick">${TIMED_QUICK_SECONDS.map(n => `<button class="btn qbtn" data-act="addn" data-n="${n}">+${n}s</button>`).join("")}</div>
-      <form class="typein" data-form="typein"><label for="typeN" class="vh">Seconds</label><input id="typeN" type="number" inputmode="numeric" min="1" max="36000" placeholder="Type seconds, e.g. 45"><button class="btn" type="submit">Add</button></form>`;
+      <form class="typein" data-form="typein"><label for="typeN" class="vh">Seconds</label><input id="typeN" type="number" inputmode="numeric" min="1" max="${MAX_ENTRY_SECONDS}" placeholder="Type seconds, e.g. 45"><button class="btn" type="submit">Add</button></form>`;
   } else if (e.type === "weighted") {
     const dr = draft(e);
     zone = `<div class="steppers">
@@ -731,7 +761,7 @@ function viewMove() {
     <section class="panel tapzone"><div class="rowsb"><h2>${esc(e.name)}</h2><button class="linkbtn" data-act="editex" data-ex="${esc(e.id)}">Edit</button></div>
       ${logDateHTML()}
       <div class="todaycount" id="todayCount">${todayCountHTML(e)}</div>${zone}
-      <p class="note center">+${nf(e.xp)} XP ${XP_LABEL[e.type].replace("XP ", "")}</p></section>
+      <p class="note center">${xpText(e)}</p></section>
     <section class="panel"><p class="label">${e.type === "weighted" ? "What to beat" : "Your numbers"}</p><div id="exStats">${exStatsHTML(e)}</div></section>
     ${timerHTML()}
     <section class="panel"><div class="rowsb"><p class="label">Log · ${esc(dayTitle(mk))}</p><button class="linkbtn" data-act="undo">Undo last</button></div><div id="moveLog">${moveLogHTML()}</div></section>`;
@@ -812,7 +842,7 @@ function entrySheet(k, id) {
   let fields;
   if (x.k === "reps") {
     const timed = e && e.type === "timed";
-    fields = `<div class="field"><label for="entN">${timed ? "Seconds" : "Number"}</label><input id="entN" type="number" inputmode="numeric" min="1" max="${timed ? 36000 : 10000}" value="${x.v}" required></div>`;
+    fields = `<div class="field"><label for="entN">${timed ? "Seconds" : "Number"}</label><input id="entN" type="number" inputmode="numeric" min="1" max="${timed ? MAX_ENTRY_SECONDS : MAX_ENTRY_NUMBER}" value="${x.v}" required></div>`;
   } else if (x.k === "set") {
     const s = d.sets.find(s => s.id === id) || { w: 0, r: 1 };
     fields = `<div class="two"><div class="field"><label for="entW">Weight (${lu()})</label><input id="entW" type="number" inputmode="decimal" step="any" min="0" value="${n1(fromKg(s.w))}" required></div>
@@ -845,7 +875,7 @@ function saveEntry(f) {
   const e = exById(x.ex);
   let upd;
   if (x.k === "reps") {
-    const n = parseInt($("#entN").value, 10), max = e && e.type === "timed" ? 36000 : 10000;
+    const n = parseInt($("#entN").value, 10), max = e && e.type === "timed" ? MAX_ENTRY_SECONDS : MAX_ENTRY_NUMBER;
     if (!(n >= 1) || n > max) { toast(`Enter a number from 1 to ${max.toLocaleString()}`); return; }
     upd = (ent) => { ent.x.v = n; };
   } else if (x.k === "set") {
@@ -996,7 +1026,7 @@ function habitsHTML() {
   return `${groups}
     <p class="sublabel">Body and daily numbers</p>
     <div class="numgrid">
-      <form data-form="num" data-k="steps"><label for="n-steps">Steps today</label><div><input id="n-steps" type="number" inputmode="numeric" min="0" placeholder="8200" value="${d.steps || ""}"><button class="btn small" type="submit">Save</button></div></form>
+      ${stepsEx() ? `<div><span class="flabel">Steps today</span><div class="counter stepsbox"><b>${exDone(d, stepsEx()).toLocaleString()}</b><button class="btn small" data-act="goex" data-ex="${esc(stepsEx().id)}" aria-label="Log steps on the Move page">Log</button></div></div>` : ""}
       <form data-form="num" data-k="weight"><label for="n-weight">Weigh-in (${bu})</label><div><input id="n-weight" type="number" inputmode="decimal" step="0.1" min="20" placeholder="${lastW ? nf(fromKg(lastW, bu)) : ""}" value="${d.weight ? n1(fromKg(d.weight, bu)) : ""}"><button class="btn small" type="submit">Save</button></div></form>
       <form data-form="num" data-k="waist"><label for="n-waist">Waist (cm)</label><div><input id="n-waist" type="number" inputmode="decimal" step="0.5" min="30" value="${d.waist || ""}"><button class="btn small" type="submit">Save</button></div></form>
       <div><span class="flabel">Beers today</span><div class="counter"><button class="mini" data-act="beer" data-d="-1" aria-label="One less beer">−</button><b>${d.beers || 0}</b><button class="mini" data-act="beer" data-d="1" aria-label="One more beer">+</button></div></div>
@@ -1048,7 +1078,7 @@ function planHTML() {
       <li>Constipation: more vegetables, water to thirst, magnesium.</li></ul></div></div>`;
 }
 function exercisesHTML() {
-  return `<ul class="exlist">${activeExercises().map(e => `<li><div><b>${esc(e.name)}</b><small>${TYPE_LABEL[e.type]} · ${nf(e.xp)} ${XP_LABEL[e.type]}${e.goal ? ` · goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal}/day` : ""}${e.nudge ? " · daily nudge" : ""}</small></div><button class="btn small" data-act="editex" data-ex="${esc(e.id)}">Edit</button></li>`).join("")}</ul>
+  return `<ul class="exlist">${activeExercises().map(e => `<li><div><b>${esc(e.name)}</b><small>${TYPE_LABEL[e.type]} · ${xpText(e)}${e.goal ? ` · goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal}/day` : ""}${e.nudge ? " · daily nudge" : ""}</small></div><button class="btn small" data-act="editex" data-ex="${esc(e.id)}">Edit</button></li>`).join("")}</ul>
     <button class="btn ghostbtn" data-act="newex">+ Add an exercise or workout</button>
     ${S.exercises.some(e => e.archived) ? `<p class="note">Hidden: ${S.exercises.filter(e => e.archived).map(e => `<button class="linkbtn" data-act="unhide" data-ex="${esc(e.id)}">${esc(e.name)} (show)</button>`).join(" ")}</p>` : ""}`;
 }
@@ -1139,6 +1169,7 @@ function exerciseSheet(id) {
       ${used ? `<small class="note">Type is locked because this exercise has history.</small>` : ""}</div>
     <div class="two"><div class="field"><label for="exXP" id="exXPl">${XP_LABEL[type]}</label><input id="exXP" type="number" inputmode="decimal" step="any" min="0" value="${e ? e.xp : type === "workout" ? 30 : DEFAULT_XP_PER_REP}"></div>
       <div class="field" id="exGoalF" ${type === "workout" || type === "weighted" ? "hidden" : ""}><label for="exGoal">Daily goal${type === "timed" ? " (seconds)" : ""}</label><input id="exGoal" type="number" inputmode="numeric" min="0" value="${e && e.goal ? e.goal : ""}" placeholder="Optional"></div></div>
+    <label class="switchrow" id="exTapF" ${type === "reps" ? "" : "hidden"}><span><b>Big +1 button</b><small>Turn off for things you type in, like steps</small></span><input type="checkbox" class="sw" id="exTap" ${!e || e.tap !== false ? "checked" : ""}></label>
     <label class="switchrow"><span><b>Daily nudge</b><small>Remind me on the Today screen if I haven't done it</small></span><input type="checkbox" class="sw" id="exNudge" ${e && e.nudge ? "checked" : ""}></label>
     <div class="row2"><button class="btn primary" type="submit">${e ? "Save" : "Add"}</button><button class="btn" type="button" data-act="closesheet">Cancel</button></div>
     ${e ? `<button class="btn danger" type="button" data-act="hideex" data-ex="${esc(e.id)}">Hide this exercise</button><p class="note">Hiding keeps its history and XP. You can show it again from More > Exercises.</p>` : ""}</form>`);
@@ -1283,7 +1314,7 @@ document.addEventListener("change", ev => {
     const q = t.value.split(/[^0-9]+/).map(Number).filter(n => n > 0 && n <= 1000).slice(0, MAX_QUICK_BUTTONS);
     S.settings.quick = q.length ? q : DEFAULT_QUICK_AMOUNTS.slice(); save(); t.value = S.settings.quick.join(", "); toast("Quick buttons: " + S.settings.quick.map(n => "+" + n).join(" ")); return;
   }
-  if (t.id === "exType") { const l = $("#exXPl"); if (l) l.textContent = XP_LABEL[t.value]; const g = $("#exGoalF"); if (g) g.hidden = t.value === "workout" || t.value === "weighted"; }
+  if (t.id === "exType") { const l = $("#exXPl"); if (l) l.textContent = XP_LABEL[t.value]; const g = $("#exGoalF"); if (g) g.hidden = t.value === "workout" || t.value === "weighted"; const tp = $("#exTapF"); if (tp) tp.hidden = t.value !== "reps"; }
 });
 document.addEventListener("input", ev => {
   const t = ev.target;
@@ -1299,7 +1330,12 @@ document.addEventListener("keydown", ev => {
 document.addEventListener("submit", ev => {
   const f = ev.target, kind = f.dataset.form; if (!kind) return; ev.preventDefault();
   if (kind === "entry") { saveEntry(f); return; }
-  if (kind === "typein") { const i = $("#typeN"), n = parseInt(i.value, 10); if (!(n > 0)) { toast("Type a number first"); return; } addReps(n); i.value = ""; i.blur(); return; }
+  if (kind === "typein") {
+    const i = $("#typeN"), n = parseInt(i.value, 10), e = curEx(), max = e && e.type === "timed" ? MAX_ENTRY_SECONDS : MAX_ENTRY_NUMBER;
+    if (!(n > 0)) { toast("Type a number first"); return; }
+    if (n > max) { toast(`That's more than ${max.toLocaleString()} in one go. Check the number?`); return; }
+    addReps(n); i.value = ""; i.blur(); return;
+  }
   if (kind === "extra") { const i = $("#extraIn"), v = i.value.trim(); if (!v) return; mutate(() => { dayW(winsDate).extras.push({ id: uid(), text: v, done: false }); }); setTimeout(() => $("#extraIn") && $("#extraIn").focus(), 20); return; }
   if (kind === "moment") { const i = $("#momentIn"), v = i.value.trim(); if (!v) return; mutate(() => { dayW(winsDate).moments.push({ id: uid(), type: momentType, text: v, t: nowTime() }); }); if (momentType === "win") sfx("win"); toast(momentType === "win" ? "Win logged. Nice." : momentType === "loss" ? "Logged. Every loss teaches something." : "Logged with gratitude."); setTimeout(() => $("#momentIn") && $("#momentIn").focus(), 20); return; }
   if (kind === "num") {
@@ -1313,7 +1349,7 @@ document.addEventListener("submit", ev => {
     const id = f.dataset.id, name = $("#exName").value.trim(); if (!name) return;
     const e = id ? exById(id) : { id: "x" + uid() };
     const type = id && $("#exType").disabled ? e.type : $("#exType").value;
-    Object.assign(e, { name, type, xp: Math.max(0, parseFloat($("#exXP").value) || 0), goal: (type === "reps" || type === "timed") ? (parseInt($("#exGoal").value, 10) || 0) : 0, nudge: $("#exNudge").checked });
+    Object.assign(e, { name, type, xp: Math.max(0, parseFloat($("#exXP").value) || 0), goal: (type === "reps" || type === "timed") ? (parseInt($("#exGoal").value, 10) || 0) : 0, nudge: $("#exNudge").checked, tap: type === "reps" ? $("#exTap").checked : undefined });
     if (!id) { e.medal = name; e.tiers = defaultTiers(type); S.exercises.push(e); }
     S.settings.lastExercise = e.id; save(); closeSheet(); render(); toast(id ? "Saved" : `Added ${name}`); return;
   }

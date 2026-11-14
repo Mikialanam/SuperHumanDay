@@ -82,6 +82,19 @@ const tab = (page, name) => page.click(`.tabbtn[data-tab="${name}"]`);
   ok(await page.evaluate(() => Object.values(S.days).every(d => d.log.every(x => !["reps", "set", "session"].includes(x.k) || x.id))), "every exercise entry has an id");
   ok(await page.evaluate(() => S.days["2026-11-13"].log.some(x => x.k === "session" && x.id === "w1")), "a session missing from the log gets an entry");
   ok(await page.evaluate(() => !!localStorage.getItem("superhuman-day-before-v2")), "untouched copy of version 1 data kept on the device");
+  // Someone who already made their own "Steps" exercise in version 1
+  const own = await page.evaluate(v1 => {
+    const mk = (legacy) => { const d = clone(v1); d.exercises.push({ id: "xmine", name: "Steps", type: "reps", xp: 1 });
+      d.days["2026-11-13"].reps.xmine = 22000; d.days["2026-11-13"].log.push({ k: "reps", ex: "xmine", v: 10000, t: "10:00" }, { k: "reps", ex: "xmine", v: 10000, t: "10:01" }, { k: "reps", ex: "xmine", v: 2000, t: "10:02" });
+      if (!legacy) for (const k in d.days) d.days[k].steps = 0; return normalize(d); };
+    const a = mk(true), b = mk(false), mine = a.exercises.find(e => e.id === "xmine"), built = a.exercises.find(e => e.id === "steps");
+    return { mineTap: mine.tap, builtHidden: !!(built && built.archived), legacyTo: a.days["2026-11-12"].reps.steps, mineKept: a.days["2026-11-13"].reps.xmine,
+      noBuiltWithoutLegacy: !b.exercises.some(e => e.id === "steps") };
+  }, V1);
+  ok(own.mineKept === 22000, "your own Steps exercise keeps its 22,000");
+  ok(own.mineTap === false, "your own Steps exercise switches to typing the number");
+  ok(own.builtHidden && own.legacyTo === 8200, "old Habits steps go to a hidden built-in Steps (same XP as before)");
+  ok(own.noBuiltWithoutLegacy, "no extra Steps exercise when there are no old Habits steps");
   if (OLD) {
     const { page: op } = await newPage(browser);
     await seed(op, OLD, V1);
@@ -175,6 +188,11 @@ const tab = (page, name) => page.click(`.tabbtn[data-tab="${name}"]`);
     ok(await noHScroll(page), `no sideways scrolling on ${t}`);
     await shot(page, t);
   }
+  await page.click("#s-habits summary");
+  await page.locator(".numgrid").scrollIntoViewIfNeeded();
+  ok((await page.textContent(".numgrid")).includes("22,000"), "Habits shows today's steps from the Steps exercise");
+  await shot(page, "habits-numbers");
+  await page.click("#s-habits summary");
   await page.click("#s-settings summary");
   await page.locator("#setDayEnd").scrollIntoViewIfNeeded();
   await shot(page, "settings");
