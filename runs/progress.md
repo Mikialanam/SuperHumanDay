@@ -3,7 +3,25 @@
 > **Live app: GitHub Pages is the live app from now on** — https://mikialanam.github.io/SuperHumanDay/ (the home-screen app). The Claude artifact link is not what's on the phone.
 > Pages deploys from branch `claude/superhuman-day-v1-v9axex` (every "pages build and deployment" run so far is from that branch, not `main`).
 
-## Run: Trends & stepped goals (started 2026-11-18)
+## Run 2: Trends & stepped goals in the v1 app (started 2026-11-18)
+Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`, `css/app.css`) on top of `claude/superhuman-day-v1-v9axex`, merge into that branch (GitHub Pages), confirm it's live, then fast-forward `main` to it. Data stays in the app's own localStorage object (and in backups). Leave the Trailkin artifact as it is.
+
+| # | Step | Estimate | Status |
+|---|------|----------|--------|
+| 0 | Merge the v1 branch into this branch (drop old `Index.html`) | 5 min | done |
+| 1 | Data + maths: `S.plans` in state (seeded burpee plan, survives backup/import), even checkpoints, target for a date, pace; stepped target drives the Move goal bar, big-button tiles, nudges and goal toast; +50 XP when hit | 30 min | todo |
+| 2 | "Trends & goal" panel on Move: today's target, next checkpoint + date, main/stretch pace, checkpoint table, empty state | 25 min | todo |
+| 3 | Goal sheet: set / edit / remove with validation and live checkpoint preview | 25 min | todo |
+| 4 | Chart: Week / Month / Year, paging, dashed average, stepped target line, stars on new bests, tap a bar for its value | 30 min | todo |
+| 5 | Live updates on every log/undo/edit, styles (light + dark), bump service-worker cache | 20 min | todo |
+| 6 | Phone tests at 360x640 and 412x915 (`tests/trends.js`), fix layout, re-run `tests/smoke.js` | 30 min | todo |
+| 7 | README + RUNLOG | 15 min | todo |
+| 8 | Merge into `claude/superhuman-day-v1-v9axex`, push, wait for Pages, check the live page shows "Trends & goal" | 20 min | todo |
+| 9 | Fast-forward `main` to the deployed version, push, write the Pages-from-main steps, handover | 15 min | todo |
+
+### Run 2 log
+
+## Run 1 (superseded): Trends & stepped goals in the old Trailkin `Index.html` (started 2026-11-18)
 Scope: trend chart + stepped goals for any count exercise (burpees first), all in `Index.html`, data kept on the device (localStorage).
 
 | # | Step | Estimate | Status |
