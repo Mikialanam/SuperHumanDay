@@ -124,6 +124,7 @@ form.new input,form.new select{font:inherit;font-weight:600;padding:10px;border-
 .prow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;padding-top:8px;border-top:1px solid var(--line)}
 .prow b{font-family:var(--display);font-weight:600}
 .prow .note{grid-column:1/-1}
+.prow > span:first-child .note{display:block}
 .pill{font-size:.78rem;font-weight:800;border-radius:99px;padding:3px 10px;white-space:nowrap}
 .pill.ok{background:var(--leaf);color:var(--panel)}
 .pill.close{background:var(--sun);color:#16302A}
@@ -137,6 +138,36 @@ details.lad summary{cursor:pointer;font-weight:800;color:var(--sky);padding:4px 
 .ltab .cur{color:var(--accent);font-weight:800}
 .gempty{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 #goalform .two{align-items:end}
+.chart{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:2px}
+.seg button{font:inherit;font-weight:800;font-size:.85rem;border:none;border-radius:8px;padding:6px 4px;background:none;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.rhead{display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
+.readout{display:flex;flex-direction:column;min-width:0;min-height:68px;justify-content:flex-end}
+.readout b{font-family:var(--display);font-size:1.7rem;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.readout b small{font-size:.9rem;color:var(--muted);font-weight:500}
+.nav{display:flex;gap:6px;flex:none}
+.nav button{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--soft);color:var(--ink);cursor:pointer}
+.nav button:disabled{opacity:.35;cursor:default}
+.chart svg{display:block;width:100%;height:auto;overflow:visible;font-family:var(--body)}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .base{stroke:var(--muted);stroke-width:1}
+.chart .ytick{fill:var(--muted);font-size:11px;text-anchor:end;font-variant-numeric:tabular-nums}
+.chart .xtick{fill:var(--muted);font-size:11px;text-anchor:middle;font-weight:600}
+.chart .xtick.now{fill:var(--ink);font-weight:800}
+.chart .barm{fill:var(--accent);transition:opacity .15s}
+.chart .barm.dim{opacity:.35}
+.chart .tline{fill:none;stroke:var(--leaf);stroke-width:2;stroke-linejoin:round}
+.chart .aline{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:5 4;opacity:.75}
+.chart .star{fill:var(--sun);stroke:var(--ink);stroke-width:.6;paint-order:stroke;font-size:15px;text-anchor:middle}
+.chart .hit{fill:transparent;cursor:pointer;outline:none}
+.chart .hit:focus-visible{fill:color-mix(in srgb,var(--sky) 15%,transparent)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.78rem;color:var(--muted);font-weight:700}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{display:inline-block;width:18px;height:0}
+.lg-a{border-top:2px dashed var(--ink);opacity:.75}
+.lg-t{border-top:2px solid var(--leaf)}
+.star-k{color:var(--sun);-webkit-text-stroke:.5px var(--ink);font-size:1rem}
 .glinks{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 </style>
 
@@ -393,6 +424,78 @@ function renderTrends(){
   if(goalFormOpen){$("goalbox").hidden=true}else{$("goalbox").hidden=false;$("goalbox").innerHTML=goalHTML(g)}
   if(typeof renderChart==="function")renderChart(g);
 }
+// ---- trend chart: W = days of a Mon–Sun week, M = weekly totals for weeks touching the month, Y = monthly totals ----
+let tview="W",toff=0,tbar=null;
+try{tview=localStorage.getItem("trailkin-view")||"W"}catch{}
+const monOf=k=>addDays(k,-((dk(k).getDay()+6)%7));
+const valOn=(id,k)=>(days[k]&&days[k][id])||0;
+function sumRange(id,a,b,f){let s=0,any=false;for(let k=a;k<=b;k=addDays(k,1)){const v=f(k);if(v!=null){s+=v;any=true}}return any?s:null}
+function chartBars(g){
+  const tk=today(),t=targets[g.id],id=g.id,B=[];let title;
+  if(tview==="W"){const mon=addDays(monOf(tk),-7*toff),sun=addDays(mon,6);
+    for(let i=0;i<7;i++){const k=addDays(mon,i);B.push({a:k,b:k,bk:k,lab:"MTWTFSS"[i],full:fmtD(k,{weekday:"short",month:"short",day:"numeric"})})}
+    title=`${fmtD(mon)} – ${fmtD(sun)}, ${dk(sun).getFullYear()}`}
+  else if(tview==="M"){const d=dk(tk);d.setDate(1);d.setMonth(d.getMonth()-toff);const y=d.getFullYear(),m=d.getMonth(),first=key(d),last=key(new Date(y,m+1,0,12));
+    for(let w=monOf(first);w<=last;w=addDays(w,7))B.push({a:w,b:addDays(w,6),bk:w,lab:fmtD(w),full:`Week of ${fmtD(w)}`});
+    title=d.toLocaleDateString(undefined,{month:"long",year:"numeric"})}
+  else{const y=dk(tk).getFullYear()-toff;
+    for(let m=0;m<12;m++){const a=key(new Date(y,m,1,12));B.push({a,b:key(new Date(y,m+1,0,12)),bk:a.slice(0,7),lab:"JFMAMJJASOND"[m],full:new Date(y,m,1).toLocaleDateString(undefined,{month:"long",year:"numeric"})})}
+    title=String(y)}
+  // all-time totals at this grain, for "beats the previous best" stars
+  const grain=tview==="W"?k=>k:tview==="M"?monOf:k=>k.slice(0,7),tot={};
+  for(const k in days){const v=days[k][id];if(v)tot[grain(k)]=(tot[grain(k)]||0)+v}
+  for(const x of B){
+    x.future=x.a>tk;
+    x.v=x.future?null:tview==="W"?valOn(id,x.a):sumRange(id,x.a,x.b,k=>valOn(id,k));
+    x.t=t?sumRange(id,x.a,x.b,k=>targetOn(t,k)):null;
+    let best=0;for(const k in tot)if(k<x.bk&&tot[k]>best)best=tot[k];
+    x.star=!!x.v&&best>0&&x.v>best;
+  }
+  // average only over periods that have started, from the first period this exercise was ever logged
+  let firstK=null;for(const k in days)if(days[k][id]&&(!firstK||k<firstK))firstK=k;
+  const past=B.filter(x=>!x.future&&firstK&&x.b>=firstK),avg=past.length?past.reduce((s,x)=>s+x.v,0)/past.length:0;
+  return{B,title,avg};
+}
+const CHEV=d=>`<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function niceStep(max){const raw=max/3,mag=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/mag;return(f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*mag}
+function renderChart(g){
+  const box=$("chartbox"),{B,title,avg}=chartBars(g),u=esc(g.unit),tk=today();
+  if(tbar!=null&&!B[tbar])tbar=null;
+  const W=Math.max(260,Math.round(box.clientWidth||320)),H=210,pl=2,pr=40,pt=22,pb=26,pw=W-pl-pr,ph=H-pt-pb;
+  const maxV=Math.max(1,avg,...B.map(x=>Math.max(x.v||0,x.t||0))),st=niceStep(maxV*1.05),ymax=st*Math.ceil(maxV*1.05/st);
+  const y=v=>pt+ph*(1-v/ymax),slot=pw/B.length,bw=Math.min(slot*.62,40),f1=n=>+n.toFixed(1);
+  let s="";
+  for(let v=0;v<=ymax+1e-9;v+=st)s+=`<line x1="${pl}" x2="${pl+pw}" y1="${f1(y(v))}" y2="${f1(y(v))}" class="${v?"grid":"base"}"/><text x="${W-2}" y="${f1(y(v)+4)}" class="ytick">${r0(v)}</text>`;
+  B.forEach((x,i)=>{const cx=pl+slot*(i+.5),x0=f1(cx-bw/2),x1=f1(cx+bw/2);
+    if(x.v){const yt=y(x.v),yb=y(0),r=Math.min(4,bw/2,yb-yt);
+      s+=`<path class="barm${tbar!=null&&tbar!==i?" dim":""}" d="M${x0},${f1(yb)}V${f1(yt+r)}Q${x0},${f1(yt)} ${f1(+x0+r)},${f1(yt)}H${f1(x1-r)}Q${x1},${f1(yt)} ${x1},${f1(yt+r)}V${f1(yb)}Z"/>`;
+      if(x.star)s+=`<text x="${f1(cx)}" y="${f1(yt-5)}" class="star">★</text>`}
+    s+=`<text x="${f1(cx)}" y="${H-8}" class="xtick${tview==="W"&&x.a===tk?" now":""}">${esc(x.lab)}</text>`});
+  // target: a solid stepped line, one level per bar (targets rise at checkpoints)
+  let tp="",prev=null;B.forEach((x,i)=>{const x0=f1(pl+slot*i),x1=f1(pl+slot*(i+1));if(x.t==null){prev=null;return}const yy=f1(y(x.t));tp+=(prev==null?`M${x0},${yy}`:`L${x0},${yy}`)+`H${x1}`;prev=x.t});
+  if(tp)s+=`<path d="${tp}" class="tline"/>`;
+  if(avg>0)s+=`<line x1="${pl}" x2="${pl+pw}" y1="${f1(y(avg))}" y2="${f1(y(avg))}" class="aline"/>`;
+  B.forEach((x,i)=>{s+=`<rect x="${f1(pl+slot*i)}" y="0" width="${f1(slot)}" height="${H}" class="hit" data-bar="${i}" tabindex="0" role="button" aria-label="${esc(x.full)}: ${x.v==null?"no data yet":r0(x.v)+" "+u}${x.t?`, target ${r0(x.t)}`:""}${x.star?", new best":""}"/>`});
+  const per=tview==="W"?"Daily":tview==="M"?"Weekly":"Monthly",sel=tbar!=null?B[tbar]:null;
+  const read=sel?`<span class="label">${esc(sel.full)}</span><b>${sel.v==null?"–":r0(sel.v)}<small> ${u}</small></b><span class="note">${sel.t?`Target ${r0(sel.t)}${sel.v!=null?(sel.v>=sel.t?" · hit ✓":` · ${r0(sel.t-sel.v)} short`):""}`:"No target set"}${sel.star?" · ★ new best":""}</span>`
+    :`<span class="label">${per} average</span><b>${r0(avg)}<small> ${u}</small></b><span class="note">${esc(title)}</span>`;
+  const hasT=B.some(x=>x.t!=null),hasS=B.some(x=>x.star);
+  box.innerHTML=`<div class="seg" role="group" aria-label="Time range">${[["W","Week"],["M","Month"],["Y","Year"]].map(([v,l])=>`<button type="button" data-view="${v}" aria-pressed="${tview===v}">${l}</button>`).join("")}</div>
+  <div class="rhead"><div class="readout">${read}</div><div class="nav"><button type="button" data-nav="1" aria-label="Previous ${per==="Daily"?"week":per==="Weekly"?"month":"year"}">${CHEV("M10 3 5 8l5 5")}</button><button type="button" data-nav="-1" aria-label="Next ${per==="Daily"?"week":per==="Weekly"?"month":"year"}" ${toff?"":"disabled"}>${CHEV("M6 3l5 5-5 5")}</button></div></div>
+  <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(g.name)}, ${per.toLowerCase()} totals for ${esc(title)}. Average ${r0(avg)}.">${s}</svg>
+  <div class="legend"><span><i class="lg-a"></i>Average</span>${hasT?`<span><i class="lg-t"></i>Target</span>`:""}${hasS?`<span><b class="star-k">★</b>New best</span>`:""}</div>`;
+}
+document.addEventListener("click",e=>{
+  const h=e.target.closest&&e.target.closest("[data-bar]");
+  if(h){const i=+h.dataset.bar;tbar=tbar===i?null:i;const g=selGoal();if(g)renderChart(g);return}
+  const v=e.target.closest&&e.target.closest("[data-view],[data-nav]");if(!v)return;
+  if(v.dataset.view){tview=v.dataset.view;toff=0;tbar=null;try{localStorage.setItem("trailkin-view",tview)}catch{}}
+  else{toff=Math.max(0,toff+ +v.dataset.nav);tbar=null}
+  const g=selGoal();if(g)renderChart(g);
+});
+document.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.dataset&&e.target.dataset.bar!=null){e.preventDefault();e.target.dispatchEvent(new MouseEvent("click",{bubbles:true}))}});
+let rsz;window.addEventListener("resize",()=>{cancelAnimationFrame(rsz);rsz=requestAnimationFrame(()=>{const g=selGoal();if(g&&!$("trendpanel").hidden)renderChart(g)})});
+
 function openGoalForm(g){
   goalFormOpen=true;goalDelSure=false;const f=$("goalform"),tk=today(),t=targets[g.id];
   let d=t;
