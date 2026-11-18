@@ -131,7 +131,7 @@ const DEFAULT_SETTINGS = {
   sound: "click", buttonStyle: "round", buttonColor: "green", haptics: true, theme: "auto",
   breathing: true, breathCues: true, showPlan: true,
   lastExercise: "burpees", lastTab: "today", breathPattern: "even", breathMinutes: 2, restSeconds: 90,
-  dayEndHour: DEFAULT_DAY_END_HOUR,
+  dayEndHour: DEFAULT_DAY_END_HOUR, trendView: "W",
 };
 const MOVE_KINDS = ["reps", "set", "session"]; // log entries that are exercise entries
 const TYPE_LABEL = { reps: "Reps", weighted: "Weight × reps", timed: "Timed", workout: "Workout" };
@@ -244,6 +244,7 @@ function normalize(s) {
   if (!s || typeof s !== "object") return f;
   s.app = "superhuman-day"; s.version = DATA_VERSION;
   s.settings = Object.assign(clone(DEFAULT_SETTINGS), s.settings || {});
+  if (!["W", "M", "Y"].includes(s.settings.trendView)) s.settings.trendView = "W";
   if (!Array.isArray(s.settings.quick) || !s.settings.quick.length) s.settings.quick = DEFAULT_QUICK_AMOUNTS.slice();
   if (s.settings.favorites !== undefined && !(Array.isArray(s.settings.favorites) && s.settings.favorites.every(x => typeof x === "string"))) delete s.settings.favorites;
   const deh = Number(s.settings.dayEndHour);
@@ -876,7 +877,88 @@ function goalCardHTML(e) {
     <div class="tglinks"><details class="tglad"${ladderOpen ? " open" : ""}><summary>All checkpoints</summary><div class="tgtable"><span class="label">Daily</span><span class="label">Main plan</span><span class="label">Stretch</span>${lad}</div></details>${edit}</div>`;
 }
 document.addEventListener("toggle", ev => { if (ev.target.classList && ev.target.classList.contains("tglad")) ladderOpen = ev.target.open; }, true);
-function renderChart() {}
+/* Trend chart. W: one bar per day of a Monday–Sunday week. M: weekly totals for the weeks that touch the month
+   (each labelled by its Monday). Y: monthly totals. Dashed line: average of the periods so far. Solid line: the
+   target (it steps up at each checkpoint). ★: beats every earlier day / week / month. Tap a bar for its numbers. */
+let chartOff = 0, chartBar = null, chartEx = null;
+const monOf = k => addDays(k, -((kdate(k).getDay() + 6) % 7));
+function sumDays(a, b, f) { let s = 0, any = false; for (let k = a; k <= b; k = addDays(k, 1)) { const v = f(k); if (v) { s += v; any = true; } } return any ? s : null; }
+function chartData(e) {
+  const t = todayKey(), view = S.settings.trendView, B = []; let title;
+  if (view === "W") {
+    const mon = addDays(monOf(t), -7 * chartOff), sun = addDays(mon, 6);
+    for (let i = 0; i < 7; i++) { const k = addDays(mon, i); B.push({ a: k, b: k, bk: k, lab: "MTWTFSS"[i], full: fmtDate(k) }); }
+    title = `${fmtDate(mon, { month: "short", day: "numeric" })} – ${fmtDate(sun, { month: "short", day: "numeric" })}, ${kdate(sun).getFullYear()}`;
+  } else if (view === "M") {
+    const d = kdate(t); d.setDate(1); d.setMonth(d.getMonth() - chartOff);
+    const first = dkey(d), last = dkey(new Date(d.getFullYear(), d.getMonth() + 1, 0, 12));
+    for (let w = monOf(first); w <= last; w = addDays(w, 7)) B.push({ a: w, b: addDays(w, 6), bk: w, lab: fmtDate(w, { month: "short", day: "numeric" }), full: `Week of ${fmtDate(w, { month: "short", day: "numeric" })}` });
+    title = d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  } else {
+    const y = kdate(t).getFullYear() - chartOff;
+    for (let m = 0; m < 12; m++) { const a = dkey(new Date(y, m, 1, 12)); B.push({ a, b: dkey(new Date(y, m + 1, 0, 12)), bk: a.slice(0, 7), lab: "JFMAMJJASOND"[m], full: new Date(y, m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" }) }); }
+    title = String(y);
+  }
+  // all-time totals at this grain, for "beats the previous best"
+  const grain = view === "W" ? k => k : view === "M" ? monOf : k => k.slice(0, 7), tot = {};
+  let firstK = null;
+  for (const k of Object.keys(S.days)) { const v = exDone(day(k), e); if (!v) continue; tot[grain(k)] = (tot[grain(k)] || 0) + v; if (!firstK || k < firstK) firstK = k; }
+  const hasGoal = e.type === "reps" || e.type === "timed", plan = planFor(e);
+  // targets count from the first day you logged this exercise (or the stepped goal's start, if that's earlier)
+  const tFrom = plan && (!firstK || plan.from < firstK) ? plan.from : firstK;
+  for (const x of B) {
+    x.future = x.a > t;
+    x.v = x.future ? null : (sumDays(x.a, x.b > t ? t : x.b, k => exDone(day(k), e)) || 0);
+    x.t = hasGoal && tFrom ? sumDays(x.a, x.b, k => k >= tFrom ? goalFor(e, k) : 0) : null;
+    let best = 0; for (const k in tot) if (k < x.bk && tot[k] > best) best = tot[k];
+    x.star = !!x.v && best > 0 && x.v > best;
+  }
+  // the average counts only periods that have started, from the first time this exercise was logged
+  const past = B.filter(x => !x.future && firstK && x.b >= firstK), avg = past.length ? past.reduce((a, x) => a + x.v, 0) / past.length : 0;
+  return { B, title, avg, view };
+}
+function niceStep(max) { const raw = max / 3, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag; }
+const CHEV = d => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function renderChart(e) {
+  const box = document.getElementById("trendChart"); if (!box || !e) return;
+  if (chartEx !== e.id) { chartEx = e.id; chartOff = 0; chartBar = null; }
+  const { B, title, avg, view } = chartData(e), t = todayKey(), u = esc(unitOf(e)), timed = e.type === "timed";
+  if (chartBar !== null && !B[chartBar]) chartBar = null;
+  const W = Math.max(260, Math.round(box.clientWidth || 320)), H = 210, pl = 2, pr = 44, pt = 22, pb = 26, pw = W - pl - pr, ph = H - pt - pb;
+  const maxV = Math.max(1, avg, ...B.map(x => Math.max(x.v || 0, x.t || 0)));
+  let st = niceStep(maxV * 1.05); if (!timed) st = Math.max(1, st); else st = Math.max(st, 10);
+  const ymax = st * Math.ceil(maxV * 1.05 / st), y = v => pt + ph * (1 - v / ymax), slot = pw / B.length, bw = Math.min(slot * .62, 40), f1 = n => +n.toFixed(1);
+  const tick = v => timed ? fmtDur(v) : v >= 10000 ? Math.round(v / 1000) + "k" : Math.round(v).toLocaleString();
+  let g = "";
+  for (let v = 0; v <= ymax + 1e-9; v += st) g += `<line x1="${pl}" x2="${pl + pw}" y1="${f1(y(v))}" y2="${f1(y(v))}" class="${v ? "grid" : "base"}"/><text x="${W - 2}" y="${f1(y(v) + 4)}" class="ytick">${tick(v)}</text>`;
+  B.forEach((x, i) => {
+    const cx = pl + slot * (i + .5), x0 = f1(cx - bw / 2), x1 = f1(cx + bw / 2);
+    if (x.v) {
+      const yt = y(x.v), yb = y(0), r = Math.min(4, bw / 2, yb - yt);
+      g += `<path class="barm${chartBar !== null && chartBar !== i ? " dim" : ""}" d="M${x0},${f1(yb)}V${f1(yt + r)}Q${x0},${f1(yt)} ${f1(+x0 + r)},${f1(yt)}H${f1(x1 - r)}Q${x1},${f1(yt)} ${x1},${f1(yt + r)}V${f1(yb)}Z"/>`;
+      if (x.star) g += `<text x="${f1(cx)}" y="${f1(yt - 5)}" class="star">★</text>`;
+    }
+    g += `<text x="${f1(cx)}" y="${H - 8}" class="xtick${view === "W" && x.a === t ? " now" : ""}">${esc(x.lab)}</text>`;
+  });
+  // target: a solid stepped line, one level per bar
+  let tp = ""; let prev = null;
+  B.forEach((x, i) => { const x0 = f1(pl + slot * i), x1 = f1(pl + slot * (i + 1)); if (x.t === null) { prev = null; return; } const yy = f1(y(x.t)); tp += (prev === null ? `M${x0},${yy}` : `L${x0},${yy}`) + `H${x1}`; prev = x.t; });
+  if (tp) g += `<path d="${tp}" class="tline"/>`;
+  if (avg > 0) g += `<line x1="${pl}" x2="${pl + pw}" y1="${f1(y(avg))}" y2="${f1(y(avg))}" class="aline"/>`;
+  B.forEach((x, i) => { g += `<rect x="${f1(pl + slot * i)}" y="0" width="${f1(slot)}" height="${H}" class="hit" data-act="tbar" data-i="${i}" tabindex="0" role="button" aria-label="${esc(x.full)}: ${x.v === null ? "not yet" : fmtV(e, x.v) + " " + u}${x.t ? `, target ${fmtV(e, x.t)}` : ""}${x.star ? ", new best" : ""}"/>`; });
+  const per = view === "W" ? "Daily" : view === "M" ? "Weekly" : "Monthly", pname = view === "W" ? "week" : view === "M" ? "month" : "year", sel = chartBar !== null ? B[chartBar] : null;
+  const read = sel ? `<span class="label">${esc(sel.full)}</span><b>${sel.v === null ? "–" : fmtV(e, sel.v)}<small> ${u}</small></b><span class="note">${sel.t ? `Target ${fmtV(e, sel.t)}${sel.v !== null ? (sel.v >= sel.t ? " · hit ✓" : ` · ${fmtV(e, sel.t - sel.v)} short`) : ""}` : "No target"}${sel.star ? " · ★ new best" : ""}</span>`
+    : `<span class="label">${per} average</span><b>${fmtV(e, avg)}<small> ${u}</small></b><span class="note">${esc(title)}</span>`;
+  const empty = !B.some(x => x.v), hasT = B.some(x => x.t !== null), hasS = B.some(x => x.star);
+  box.innerHTML = `<div class="seg" role="group" aria-label="Time range">${[["W", "Week"], ["M", "Month"], ["Y", "Year"]].map(([v, l]) => `<button type="button" data-act="tview" data-v="${v}" aria-pressed="${view === v}">${l}</button>`).join("")}</div>
+    <div class="tghead"><div class="tgread" aria-live="polite">${read}</div><div class="tgnav"><button type="button" class="mini" data-act="tnav" data-d="1" aria-label="Previous ${pname}">${CHEV("M10 3 5 8l5 5")}</button><button type="button" class="mini" data-act="tnav" data-d="-1" aria-label="Next ${pname}" ${chartOff ? "" : "disabled"}>${CHEV("M6 3l5 5-5 5")}</button></div></div>
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(e.name)}, ${per.toLowerCase()} totals, ${esc(title)}. Average ${fmtV(e, avg)}.">${g}</svg>
+    ${empty ? `<p class="note">Nothing logged this ${pname}.</p>` : ""}
+    <div class="tglegend">${avg > 0 ? `<span><i class="lg-a"></i>Average</span>` : ""}${hasT ? `<span><i class="lg-t"></i>Target</span>` : ""}${hasS ? `<span><b class="lg-s">★</b>New best</span>` : ""}</div>`;
+}
+document.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key === " ") && ev.target.dataset && ev.target.dataset.act === "tbar") { ev.preventDefault(); ev.target.dispatchEvent(new MouseEvent("click", { bubbles: true })); } });
+let chartResize = 0;
+addEventListener("resize", () => { cancelAnimationFrame(chartResize); chartResize = requestAnimationFrame(() => { if (tab === "move") renderChart(curEx()); }); });
 
 function favTilesHTML(cur) {
   const k = moveDay(), d = day(k);
@@ -1443,6 +1525,9 @@ document.addEventListener("click", ev => {
     case "closesheet": closeSheet(); break;
     case "plannew": case "planedit": planSheet(ds.ex); break;
     case "plandel": deletePlan(ds.ex); break;
+    case "tview": S.settings.trendView = ds.v; chartOff = 0; chartBar = null; save(); renderChart(curEx()); break;
+    case "tnav": chartOff = Math.max(0, chartOff + +ds.d); chartBar = null; renderChart(curEx()); break;
+    case "tbar": chartBar = chartBar === +ds.i ? null : +ds.i; renderChart(curEx()); break;
     case "hideex": { const e = exById(ds.ex); if (!e || !confirm(`Hide ${e.name}? Its history and XP are kept.`)) break; e.archived = true; if (S.settings.lastExercise === e.id) S.settings.lastExercise = (activeExercises()[0] || {}).id; save(); closeSheet(); render(); toast(`${e.name} hidden`); break; }
     case "unhide": { const e = exById(ds.ex); if (e) { e.archived = false; save(); render(); } break; }
     case "tmode": timer.mode = ds.m; timer.running = false; timer.elapsed = 0; ensureTicker(); openSection = "timer"; render(); break;
@@ -1553,7 +1638,7 @@ function stopHold(log) {
   render();
 }
 function afterRender() {
-  // nothing heavy: keep focus behaviour simple
+  if (tab === "move") renderChart(curEx()); // the chart is sized to its box, so it's drawn once the page is on screen
 }
 
 /* ---------- resume and morning logic ---------- */

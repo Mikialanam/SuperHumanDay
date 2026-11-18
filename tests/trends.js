@@ -62,6 +62,19 @@ const noHScroll = page => page.evaluate(() => document.documentElement.scrollWid
     ok((await page.textContent("#plPrev")).includes("stretch date should fall between"), "a stretch date after the final date is refused");
     await page.fill("#plStretch", "2026-12-25");
     await page.click('[data-act="closesheet"]');
+
+    // chart: week, month, year
+    await scrollTo(page, "#trendChart");
+    const bars = () => page.locator("#trendChart .barm").count();
+    ok(await bars() === 3, "week view: bars for Mon, Tue and today (Wed)");
+    ok(await page.locator("#trendChart .star").count() === 1, "week view: one star (Tue's 55 beat the earlier best of 50)");
+    ok(await page.locator("#trendChart .tline").count() === 1 && await page.locator("#trendChart .aline").count() === 1, "week view: solid target line and dashed average line");
+    await shot(page, `${size.name}-week`);
+    await page.click('[data-act="tview"][data-v="M"]'); await shot(page, `${size.name}-month`);
+    ok((await page.textContent(".tgread")).includes("Weekly average"), "month view shows weekly totals");
+    await page.click('[data-act="tview"][data-v="Y"]'); await page.click('[data-act="tbar"][data-i="10"]'); await shot(page, `${size.name}-year`);
+    ok((await page.textContent(".tgread")).includes("November 2026"), "tapping a bar shows its month");
+    await page.click('[data-act="tview"][data-v="W"]');
     await ctx.close();
   }
   await browser.close();

@@ -445,3 +445,30 @@ details.panel:not([open]) { gap: 0; }
 .sheetbox input[type=date] { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); font-size: 16px; }
 .sheetbox .two > .field { min-width: 0; }
 .sheetbox input[type=date] { min-width: 0; max-width: 100%; padding: 10px 8px; -webkit-appearance: none; appearance: none; }
+.tgchart { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.tggoal:empty + .tgchart, .tgpanel > .rowsb + .tgchart { border-top: 0; padding-top: 0; }
+.tghead { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; }
+.tgread { display: flex; flex-direction: column; min-width: 0; min-height: 70px; justify-content: flex-end; }
+.tgread b { font-family: var(--display); font-size: 1.75rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tgread b small { font-size: .9rem; color: var(--muted); font-weight: 600; }
+.tgnav { display: flex; gap: 6px; flex: none; }
+.tgnav .mini { width: 44px; height: 44px; display: grid; place-items: center; }
+.tgchart svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font); }
+.tgchart .grid { stroke: var(--line); stroke-width: 1; }
+.tgchart .base { stroke: var(--muted); stroke-width: 1; }
+.tgchart .ytick { fill: var(--muted); font-size: 11px; text-anchor: end; font-variant-numeric: tabular-nums; }
+.tgchart .xtick { fill: var(--muted); font-size: 11px; text-anchor: middle; font-weight: 600; }
+.tgchart .xtick.now { fill: var(--ink); font-weight: 800; }
+.tgchart .barm { fill: var(--accent); transition: opacity .15s; }
+.tgchart .barm.dim { opacity: .35; }
+.tgchart .tline { fill: none; stroke: var(--c-coral); stroke-width: 2; stroke-linejoin: round; }
+.tgchart .aline { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .75; }
+.tgchart .star { fill: var(--sun); stroke: var(--ink); stroke-width: .6; paint-order: stroke; font-size: 15px; text-anchor: middle; }
+.tgchart .hit { fill: transparent; cursor: pointer; outline: none; }
+.tgchart .hit:focus-visible { fill: color-mix(in srgb, var(--sky) 15%, transparent); }
+.tglegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .8rem; color: var(--muted); font-weight: 650; }
+.tglegend span { display: inline-flex; align-items: center; gap: 6px; }
+.tglegend i { display: inline-block; width: 18px; height: 0; }
+.lg-a { border-top: 2px dashed var(--ink); opacity: .75; }
+.lg-t { border-top: 2px solid var(--c-coral); }
+.lg-s { color: var(--sun); -webkit-text-stroke: .5px var(--ink); font-size: 1rem; }

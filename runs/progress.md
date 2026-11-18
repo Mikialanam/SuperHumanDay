@@ -12,7 +12,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 | 1 | Data + maths: `S.plans` in state (seeded burpee plan, survives backup/import), even checkpoints, target for a date, pace; stepped target drives the Move goal bar, big-button tiles, nudges and goal toast; +50 XP when hit | 30 min | done |
 | 2 | "Trends & goal" panel on Move: today's target, next checkpoint + date, main/stretch pace, checkpoint table, empty state | 25 min | done |
 | 3 | Goal sheet: set / edit / remove with validation and live checkpoint preview | 25 min | done |
-| 4 | Chart: Week / Month / Year, paging, dashed average, stepped target line, stars on new bests, tap a bar for its value | 30 min | todo |
+| 4 | Chart: Week / Month / Year, paging, dashed average, stepped target line, stars on new bests, tap a bar for its value | 30 min | done |
 | 5 | Live updates on every log/undo/edit, styles (light + dark), bump service-worker cache | 20 min | todo |
 | 6 | Phone tests at 360x640 and 412x915 (`tests/trends.js`), fix layout, re-run `tests/smoke.js` | 30 min | todo |
 | 7 | README + RUNLOG | 15 min | todo |
@@ -23,6 +23,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 - Step 1: `S.plans` (seeded with the burpee goal when missing, `{}` kept if all removed, invalid plans dropped on load/import). `ladder`, `targetOn`, `goalFor`, `pace` in js/app.js. Checked: 60 Dec 14, 70 Jan 10, 80 Feb 5, 90 Mar 4, 100 Mar 30; stretch 60 Nov 25 … 100 Dec 25; 50 burpees on Nov 18 = 150 XP (100 + 50 bonus). Next: step 2.
 - Step 2: Trends & goal panel under the big button on Move (goal card only for reps/timed exercises; chart slot for all). `tests/trends.js` started (seeds before the app loads). Next: step 3.
 - Step 3: goal sheet (prefilled from the last 7 days for a new goal; checkpoint chips preview; same validation as on load; remove asks to confirm). Fixed date fields overflowing at 360px. Next: step 4 (chart).
+- Step 4: SVG chart drawn after render (sized to its box) and on resize; view remembered in settings (`trendView`). Target line uses the day's goal (stepped or plain) from the first logged day or goal start. Checked W/M/Y at both sizes. Next: step 5.
 
 ## Run 1 (superseded): Trends & stepped goals in the old Trailkin `Index.html` (started 2026-11-18)
 Scope: trend chart + stepped goals for any count exercise (burpees first), all in `Index.html`, data kept on the device (localStorage).
