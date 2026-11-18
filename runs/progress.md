@@ -14,7 +14,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 | 3 | Goal sheet: set / edit / remove with validation and live checkpoint preview | 25 min | done |
 | 4 | Chart: Week / Month / Year, paging, dashed average, stepped target line, stars on new bests, tap a bar for its value | 30 min | done |
 | 5 | Live updates on every log/undo/edit, styles (light + dark), bump service-worker cache | 20 min | done |
-| 6 | Phone tests at 360x640 and 412x915 (`tests/trends.js`), fix layout, re-run `tests/smoke.js` | 30 min | todo |
+| 6 | Phone tests at 360x640 and 412x915 (`tests/trends.js`), fix layout, re-run `tests/smoke.js` | 30 min | done |
 | 7 | README + RUNLOG | 15 min | todo |
 | 8 | Merge into `claude/superhuman-day-v1-v9axex`, push, wait for Pages, check the live page shows "Trends & goal" | 20 min | todo |
 | 9 | Fast-forward `main` to the deployed version, push, write the Pages-from-main steps, handover | 15 min | todo |
@@ -25,6 +25,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 - Step 3: goal sheet (prefilled from the last 7 days for a new goal; checkpoint chips preview; same validation as on load; remove asks to confirm). Fixed date fields overflowing at 360px. Next: step 4 (chart).
 - Step 4: SVG chart drawn after render (sized to its box) and on resize; view remembered in settings (`trendView`). Target line uses the day's goal (stepped or plain) from the first logged day or goal start. Checked W/M/Y at both sizes. Next: step 5.
 - Step 5: each log/undo updates the goal card, chart, big-button tile and XP without a page redraw; toast 'Daily target hit! +50 XP'; `sw.js` cache v2.5. Next: step 6.
+- Step 6: `node tests/trends.js` 23/23 checks pass at 360x640 and 412x915 (light, dark, Dec 28, push-ups, bench). `node tests/smoke.js` all pass, and with `OLD=` the live version: same XP (527), level, streaks and totals. Layout fixes: date fields overflowing in the goal sheet, unit wrapping in the target tile, target line drawn back to January. Next: step 7.
 
 ## Run 1 (superseded): Trends & stepped goals in the old Trailkin `Index.html` (started 2026-11-18)
 Scope: trend chart + stepped goals for any count exercise (burpees first), all in `Index.html`, data kept on the device (localStorage).
