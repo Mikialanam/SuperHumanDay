@@ -75,7 +75,47 @@ const noHScroll = page => page.evaluate(() => document.documentElement.scrollWid
     await page.click('[data-act="tview"][data-v="Y"]'); await page.click('[data-act="tbar"][data-i="10"]'); await shot(page, `${size.name}-year`);
     ok((await page.textContent(".tgread")).includes("November 2026"), "tapping a bar shows its month");
     await page.click('[data-act="tview"][data-v="W"]');
+
+    // logging updates the goal card, chart and XP straight away; hitting the target adds the bonus
+    const state = () => page.evaluate(() => ({ xp: totalXP(), today: exDone(day(todayKey()), exById("burpees")), tile: document.querySelector(".tgtile b").textContent, read: document.querySelector(".tgread b").textContent, fav: document.querySelector('.favbtn[data-ex="burpees"] small').textContent }));
+    const s0 = await state();
+    ok(s0.fav.includes("30 / 50"), "big button tile shows today's target (30 / 50)");
+    await page.click('[data-act="addn"][data-n="10"]');
+    const s1 = await state();
+    ok(s1.tile.startsWith("40") && s1.read !== s0.read && s1.xp - s0.xp === 20, "+10 updates the goal card and the chart average at once (+20 XP)");
+    await page.click('[data-act="addn"][data-n="10"]');
+    const s2 = await state(), toastTxt = await page.textContent("#toast");
+    ok(s2.today === 50 && s2.xp - s1.xp === 20 + 50, "reaching 50 adds the +50 XP target bonus");
+    ok(/Daily target hit! \+50 XP/.test(toastTxt), "toast says the daily target was hit");
+    ok((await page.textContent(".tgtile .note")).includes("Hit!"), "goal card says Hit!");
+    await scrollTo(page, ".tgpanel"); await shot(page, `${size.name}-hit`);
+    await page.click('[data-act="undo"]');
+    const s3 = await state();
+    ok(s3.today === 40 && s3.xp === s1.xp, "undo takes the set and the bonus back");
     await ctx.close();
+
+    // dark mode, and a date after the stretch date
+    { const { ctx, page } = await open(browser, size, { dark: true });
+      await scrollTo(page, ".tgpanel"); await shot(page, `${size.name}-dark`); await ctx.close(); }
+    { const { ctx, page } = await open(browser, size, { time: new Date("2026-12-28T15:00:00Z") });
+      await page.click("summary"); await scrollTo(page, ".tgpanel");
+      ok((await page.textContent(".tggoal")).includes("Date passed"), "after Dec 25 the stretch goal says Date passed");
+      ok((await page.textContent(".tgtile b")).includes("/ 60"), "Dec 28 target is 60 (stepped up on Dec 14)");
+      await shot(page, `${size.name}-late`); ok(await noHScroll(page), "no sideways scrolling (late)"); await ctx.close(); }
+    { const { ctx, page } = await open(browser, size);
+      // other exercises: no goal yet (push-ups), and a weighted one gets the chart only
+      await page.click('[data-act="moreex"]'); await page.click('[data-act="pickex"][data-ex="pushups"]');
+      ok(await page.isVisible('[data-act="plannew"]'), "push-ups offers Set a stepped goal");
+      await scrollTo(page, ".tgpanel"); await shot(page, `${size.name}-pushups`);
+      await page.click('[data-act="moreex"]'); await page.click('[data-act="pickex"][data-ex="bench"]');
+      ok(await page.isVisible("#trendChart svg") && !(await page.isVisible("#tgGoal")), "bench press shows the chart without a goal card");
+      ok(await noHScroll(page), "no sideways scrolling (other exercises)");
+      // remove the burpee goal; it stays removed after a reload
+      await page.click('[data-act="fav"][data-ex="burpees"]'); await page.click('[data-act="planedit"]'); await page.click('[data-act="plandel"]');
+      await page.reload(); await page.click('.tabbtn[data-tab="move"]');
+      ok(await page.isVisible('[data-act="plannew"]') && await page.evaluate(() => JSON.parse(localStorage.getItem("superhuman-day")).plans.burpees === undefined), "a removed goal stays removed after reopening");
+      await ctx.close(); }
+    continue;
   }
   await browser.close();
   console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
