@@ -1,7 +1,7 @@
 # Progress
 
-> **Live app: GitHub Pages is the live app from now on** — https://mikialanam.github.io/SuperHumanDay/ (the home-screen app). The Claude artifact link is not what's on the phone.
-> Pages deploys from branch `claude/superhuman-day-v1-v9axex` (every "pages build and deployment" run so far is from that branch, not `main`).
+> **Live app: GitHub Pages is the live app from now on** — https://mikialanam.github.io/SuperHumanDay/ (the home-screen app). The Claude Trailkin artifact is an old prototype; leave it as it is.
+> **Source of truth: `main`.** As of 2026-11-18, `main` and `claude/superhuman-day-v1-v9axex` point at the same commit. Pages still deploys from `claude/superhuman-day-v1-v9axex` until Miki switches it to `main` (steps below). Do new work on top of `main`.
 
 ## Run 2: Trends & stepped goals in the v1 app (started 2026-11-18)
 Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`, `css/app.css`) on top of `claude/superhuman-day-v1-v9axex`, merge into that branch (GitHub Pages), confirm it's live, then fast-forward `main` to it. Data stays in the app's own localStorage object (and in backups). Leave the Trailkin artifact as it is.
@@ -17,7 +17,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 | 6 | Phone tests at 360x640 and 412x915 (`tests/trends.js`), fix layout, re-run `tests/smoke.js` | 30 min | done |
 | 7 | README + RUNLOG | 15 min | done |
 | 8 | Merge into `claude/superhuman-day-v1-v9axex`, push, wait for Pages, check the live page shows "Trends & goal" | 20 min | done |
-| 9 | Fast-forward `main` to the deployed version, push, write the Pages-from-main steps, handover | 15 min | todo |
+| 9 | Fast-forward `main` to the deployed version, push, write the Pages-from-main steps, handover | 15 min | done |
 
 ### Run 2 log
 - Step 1: `S.plans` (seeded with the burpee goal when missing, `{}` kept if all removed, invalid plans dropped on load/import). `ladder`, `targetOn`, `goalFor`, `pace` in js/app.js. Checked: 60 Dec 14, 70 Jan 10, 80 Feb 5, 90 Mar 4, 100 Mar 30; stretch 60 Nov 25 … 100 Dec 25; 50 burpees on Nov 18 = 150 XP (100 + 50 bonus). Next: step 2.
@@ -28,6 +28,20 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 - Step 6: `node tests/trends.js` 23/23 checks pass at 360x640 and 412x915 (light, dark, Dec 28, push-ups, bench). `node tests/smoke.js` all pass, and with `OLD=` the live version: same XP (527), level, streaks and totals. Layout fixes: date fields overflowing in the goal sheet, unit wrapping in the target tile, target line drawn back to January. Next: step 7.
 - Step 7: README (feature, tuning constants, data, tests, Pages from main) and RUNLOG v2.5 entry. Next: step 8 (merge to Pages branch).
 - Step 8: fast-forwarded `claude/superhuman-day-v1-v9axex` 8abfe53 → 8d99165 and pushed. Pages run #6 (https://github.com/Mikialanam/SuperHumanDay/actions/runs/44253648213) completed: success. Live check in a phone-size browser at 360x640 and 412x915: Move page shows "Trends & goal" with the goal card and chart, no page errors. Next: step 9.
+- Step 9: fast-forwarded `main` (19c6791) to this branch, so `main`, `claude/superhuman-day-v1-v9axex` and `claude/superhuman-trends-goals-beo6t4` are the same commit. No force pushes.
+
+### Switch GitHub Pages to deploy from `main`
+1. Open https://github.com/Mikialanam/SuperHumanDay/settings/pages (repo > Settings > Pages, under "Code and automation").
+2. Under **Build and deployment**, leave **Source** on **Deploy from a branch**.
+3. Under **Branch**, change `claude/superhuman-day-v1-v9axex` to **`main`**, keep the folder at **`/ (root)`**, and press **Save**.
+4. Open the **Actions** tab and wait for the new **pages build and deployment** run on `main` to turn green (about 30 seconds).
+5. Open https://mikialanam.github.io/SuperHumanDay/ and check Move shows Trends & goal. The address doesn't change, so the home-screen icon and its data keep working.
+6. Afterwards the old `claude/superhuman-day-v1-v9axex` (and its copy `claude/confident-fermat-r8it33`) can be deleted; nothing deploys from them.
+
+### Handover (run 2)
+- Done: trends + stepped goals live in the v1 app; main matches the deployed version.
+- Next: switch Pages to `main` (Miki, steps above). Then pick from Later.
+- Blocked: nothing.
 
 ## Run 1 (superseded): Trends & stepped goals in the old Trailkin `Index.html` (started 2026-11-18)
 Scope: trend chart + stepped goals for any count exercise (burpees first), all in `Index.html`, data kept on the device (localStorage).
@@ -60,7 +74,7 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 - Run complete. Pick from Later if wanted.
 
 ## Blocked
-- 2026-11-18: Merge to the Pages branch stopped. This run's work changed the old single-file Trailkin `Index.html` (from `main`). The Pages branch is the rewritten Superhuman Day v1 (`index.html`, `js/app.js`, `css/app.css`, service worker, data version 2) and has deleted `Index.html`, so the merge gives a modify/delete conflict, and even a forced merge would not put the panel in the live app. The feature needs porting into `js/app.js` on top of `claude/superhuman-day-v1-v9axex`. Waiting on Miki's go-ahead.
+- Resolved in run 2: 2026-11-18: Merge to the Pages branch stopped. This run's work changed the old single-file Trailkin `Index.html` (from `main`). The Pages branch is the rewritten Superhuman Day v1 (`index.html`, `js/app.js`, `css/app.css`, service worker, data version 2) and has deleted `Index.html`, so the merge gives a modify/delete conflict, and even a forced merge would not put the panel in the live app. The feature needs porting into `js/app.js` on top of `claude/superhuman-day-v1-v9axex`. Waiting on Miki's go-ahead.
 
 ## Later
 - Choose Sunday vs Monday week start.
