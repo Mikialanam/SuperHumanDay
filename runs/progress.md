@@ -10,7 +10,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 |---|------|----------|--------|
 | 0 | Merge the v1 branch into this branch (drop old `Index.html`) | 5 min | done |
 | 1 | Data + maths: `S.plans` in state (seeded burpee plan, survives backup/import), even checkpoints, target for a date, pace; stepped target drives the Move goal bar, big-button tiles, nudges and goal toast; +50 XP when hit | 30 min | done |
-| 2 | "Trends & goal" panel on Move: today's target, next checkpoint + date, main/stretch pace, checkpoint table, empty state | 25 min | todo |
+| 2 | "Trends & goal" panel on Move: today's target, next checkpoint + date, main/stretch pace, checkpoint table, empty state | 25 min | done |
 | 3 | Goal sheet: set / edit / remove with validation and live checkpoint preview | 25 min | todo |
 | 4 | Chart: Week / Month / Year, paging, dashed average, stepped target line, stars on new bests, tap a bar for its value | 30 min | todo |
 | 5 | Live updates on every log/undo/edit, styles (light + dark), bump service-worker cache | 20 min | todo |
@@ -21,6 +21,7 @@ Scope: rebuild the trends + stepped-goals feature inside the v1 app (`js/app.js`
 
 ### Run 2 log
 - Step 1: `S.plans` (seeded with the burpee goal when missing, `{}` kept if all removed, invalid plans dropped on load/import). `ladder`, `targetOn`, `goalFor`, `pace` in js/app.js. Checked: 60 Dec 14, 70 Jan 10, 80 Feb 5, 90 Mar 4, 100 Mar 30; stretch 60 Nov 25 … 100 Dec 25; 50 burpees on Nov 18 = 150 XP (100 + 50 bonus). Next: step 2.
+- Step 2: Trends & goal panel under the big button on Move (goal card only for reps/timed exercises; chart slot for all). `tests/trends.js` started (seeds before the app loads). Next: step 3.
 
 ## Run 1 (superseded): Trends & stepped goals in the old Trailkin `Index.html` (started 2026-11-18)
 Scope: trend chart + stepped goals for any count exercise (burpees first), all in `Index.html`, data kept on the device (localStorage).

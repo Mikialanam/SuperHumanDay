@@ -1,0 +1,61 @@
+/* Superhuman Day: Trends & goal test (developer tool only; the app never loads this file).
+   Seeds three weeks of burpees, then checks the stepped goal, pace, chart and XP on two phone sizes.
+
+   1. Serve the repo:            python3 -m http.server 8000
+   2. Run:                       node tests/trends.js
+   Options: BASE (default http://localhost:8000/), SHOTS (default ./trend-shots), ONLY (a check name to screenshot only). */
+const { chromium } = require("playwright");
+const fs = require("fs");
+const path = require("path");
+
+const BASE = process.env.BASE || "http://localhost:8000/";
+const SHOTS = process.env.SHOTS || path.join(process.cwd(), "trend-shots");
+fs.mkdirSync(SHOTS, { recursive: true });
+let failures = 0;
+const ok = (cond, msg) => { console.log((cond ? "  PASS " : "  FAIL ") + msg); if (!cond) failures++; };
+
+const SIZES = [{ name: "360x640", width: 360, height: 640 }, { name: "412x915", width: 412, height: 915 }];
+const NOW = new Date("2026-11-18T17:30:00Z"); // Wed Nov 18, 5:30pm (browser runs in UTC)
+
+// Oct 28 … Nov 17 burpees, plus 30 so far today
+const HIST = [10, 15, 5, 20, 0, 25, 30, 20, 35, 15, 40, 25, 30, 0, 45, 40, 35, 50, 30, 45, 55];
+function seedData() {
+  const days = {}; let d = new Date("2026-10-28T12:00:00Z"), n = 0;
+  const put = (k, v) => { days[k] = { reps: { burpees: v }, sets: [], sessions: [], log: [{ k: "reps", ex: "burpees", v, t: "09:00", id: "e" + (++n) }], top3: [], extras: [], moments: [], breath: [], rest: false, habits: {}, weight: null, waist: null, beers: 0 }; };
+  for (const v of HIST) { const k = d.toISOString().slice(0, 10); if (v) put(k, v); d.setUTCDate(d.getUTCDate() + 1); }
+  put("2026-11-18", 30);
+  return { app: "superhuman-day", version: 2, settings: { lastExercise: "burpees", lastTab: "move" }, days,
+    meta: { created: "2026-10-28T10:00:00.000Z", lastBackup: "2026-11-17T10:00:00.000Z", lastOpenDay: "2026-11-18" } };
+}
+
+async function open(browser, size, opts = {}) {
+  const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 1, isMobile: true, hasTouch: true, timezoneId: "UTC", serviceWorkers: "block", colorScheme: opts.dark ? "dark" : "light" });
+  const page = await ctx.newPage();
+  page.on("pageerror", e => { console.log("  PAGE ERROR " + e.message); failures++; });
+  page.on("dialog", d => d.accept());
+  await page.clock.setFixedTime(opts.time || NOW);
+  // seed before the app starts (once per tab), so the app never saves over it
+  await page.addInitScript(d => { if (sessionStorage.getItem("seeded")) return; sessionStorage.setItem("seeded", "1"); localStorage.clear(); localStorage.setItem("superhuman-day", d); }, JSON.stringify(opts.data || seedData()));
+  await page.goto(BASE);
+  await page.click('.tabbtn[data-tab="move"]');
+  return { ctx, page };
+}
+const scrollTo = (page, sel) => page.evaluate(s => { const el = document.querySelector(s); scrollTo(0, el.getBoundingClientRect().top + scrollY - 64); }, sel);
+const shot = async (page, name) => { try { await page.clock.runFor(4000); } catch (e) {} await page.waitForTimeout(50); return page.screenshot({ path: path.join(SHOTS, name + ".png"), animations: "disabled" }); };
+const noHScroll = page => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
+
+(async () => {
+  const browser = await chromium.launch();
+  for (const size of SIZES) {
+    console.log(`\n${size.name}`);
+    const { ctx, page } = await open(browser, size);
+    ok(await page.isVisible("#tgTitle"), "Trends & goal panel is on the Move page");
+    ok((await page.textContent("#tgTitle")).trim() === "Trends & goal", 'title reads "Trends & goal"');
+    await scrollTo(page, ".tgpanel"); await shot(page, `${size.name}-goal`);
+    ok(await noHScroll(page), "no sideways scrolling");
+    await ctx.close();
+  }
+  await browser.close();
+  console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
+  process.exit(failures ? 1 : 0);
+})();

@@ -827,10 +827,57 @@ function viewMove() {
       ${logDateHTML()}
       <div class="todaycount" id="todayCount">${todayCountHTML(e)}</div>${zone}
       <p class="note center">${xpText(e)}</p></section>
+    ${trendPanelHTML(e)}
     <section class="panel"><p class="label">${e.type === "weighted" ? "What to beat" : "Your numbers"}</p><div id="exStats">${exStatsHTML(e)}</div></section>
     ${timerHTML()}
     <section class="panel"><div class="rowsb"><p class="label">Log · ${esc(dayTitle(mk))}</p><button class="linkbtn" data-act="undo">Undo last</button></div><div id="moveLog">${moveLogHTML()}</div></section>`;
 }
+/* ---------- Trends & goal (Move page) ---------- */
+const fmtV = (e, v) => e.type === "timed" ? fmtDur(v) : Math.round(v).toLocaleString();
+const unitOf = e => e.type === "timed" ? "" : e.type === "workout" ? "workouts" : e.type === "weighted" ? "reps" : (e.unit || e.name.toLowerCase());
+let ladderOpen = false;
+function trendPanelHTML(e) {
+  const goals = e.type === "reps" || e.type === "timed";
+  return `<section class="panel tgpanel" aria-labelledby="tgTitle"><div class="rowsb"><h2 id="tgTitle">${goals && planFor(e) ? "Trends &amp; goal" : "Trends"}</h2></div>
+    ${goals ? `<div class="tggoal" id="tgGoal">${goalCardHTML(e)}</div>` : ""}
+    <div class="tgchart" id="trendChart"></div></section>`;
+}
+function paceRowHTML(title, sub, p, extra) {
+  const r = p.need ? p.got / p.need : 0;
+  const st = p.today && r < 1 ? { c: "wait", l: p.got ? "• In progress" : "• Log a set to start" }
+    : r >= 1 ? { c: "ok", l: "✓ On pace" } : r >= PACE_CLOSE ? { c: "close", l: "~ Close" } : { c: "behind", l: "! Behind" };
+  const det = p.today ? `Today so far ${Math.round(p.got).toLocaleString()} vs ${Math.round(p.need).toLocaleString()} needed`
+    : `${p.n}-day average ${Math.round(p.got).toLocaleString()} vs ${Math.round(p.need).toLocaleString()} the plan asked for`;
+  return `<div class="tgrow"><span class="tgrowt"><b>${title}</b><small>${sub}</small></span><span class="tgpill ${st.c}">${st.l}</span><p class="note">${det}${extra ? ` · ${extra}` : ""}</p></div>`;
+}
+function goalCardHTML(e) {
+  const p = planFor(e), t = todayKey(), v = exDone(day(t), e), u = esc(unitOf(e)), sd = k => fmtDate(k, { month: "short", day: "numeric" });
+  if (!p) return `<div class="tgempty"><p class="note">No stepped goal for ${esc(e.name.toLowerCase())} yet. Pick a starting and a final daily target and a date, and the app spreads even checkpoints in between${e.goal ? `. Until then the plain goal of ${fmtV(e, e.goal)} a day is used` : ""}.</p><button class="btn primary small" data-act="plannew" data-ex="${esc(e.id)}">Set a stepped goal</button></div>`;
+  const L = ladder(p, p.by), SL = p.stretch ? ladder(p, p.stretch) : null, edit = `<button class="linkbtn" data-act="planedit" data-ex="${esc(e.id)}">Edit goal</button>`;
+  if (t < p.from) return `<div class="tgtiles"><div class="tgtile"><span class="label">Starts</span><b>${sd(p.from)}</b><span class="note">${fmtV(e, p.start)} ${u} a day</span></div><div class="tgtile"><span class="label">Final target</span><b>${fmtV(e, p.final)}<small> /day</small></b><span class="note">by ${sd(p.by)}</span></div></div><div class="tglinks"><span></span>${edit}</div>`;
+  const tg = targetOn(p, t), next = L.find(c => c.k > t), left = next ? daysBetween(t, next.k) : 0;
+  const nextTile = next ? `<span class="label">Next checkpoint</span><b>${fmtV(e, next.v)}<small> /day</small></b><span class="note">from ${fmtDate(next.k)} · ${left === 1 ? "tomorrow" : `in ${left} days`}</span>`
+    : `<span class="label">Final target</span><b>${fmtV(e, p.final)}<small> /day</small></b><span class="note">top step since ${sd(p.by)}</span>`;
+  let rows = paceRowHTML("Main goal", `${fmtV(e, p.final)}/day by ${sd(p.by)}`, pace(e, p, p.by));
+  if (p.stretch) {
+    if (t > p.stretch) {
+      const got = exDone(day(p.stretch), e), hit = got >= p.final;
+      rows += `<div class="tgrow"><span class="tgrowt"><b>Stretch goal</b><small>${fmtV(e, p.final)}/day by ${sd(p.stretch)}</small></span><span class="tgpill ${hit ? "ok" : "wait"}">${hit ? "✓ Reached" : "Date passed"}</span><p class="note">${fmtV(e, got)} ${u} on ${sd(p.stretch)}</p></div>`;
+    } else {
+      const sn = SL.find(c => c.k > t);
+      rows += paceRowHTML("Stretch goal", `${fmtV(e, p.final)}/day by ${sd(p.stretch)}`, pace(e, p, p.stretch), `stretch target today ${fmtV(e, targetOn(p, t, p.stretch))}${sn ? `, ${fmtV(e, sn.v)} from ${sd(sn.k)}` : ""}`);
+    }
+  }
+  const cur = next ? L[L.indexOf(next) - 1] : L[L.length - 1];
+  const lad = L.map((c, i) => { const cls = c === cur ? "cur" : c.k <= t ? "past" : ""; return `<b class="${cls}">${fmtV(e, c.v)}</b><span class="${cls}">${sd(c.k)}</span><span class="${SL && SL[i].k <= t ? "past" : ""}">${SL ? sd(SL[i].k) : "–"}</span>`; }).join("");
+  return `<div class="tgtiles"><div class="tgtile"><span class="label">Today's target</span><b>${fmtV(e, v)}<small> / ${fmtV(e, tg)}</small></b><span class="note">${v >= tg ? `Hit! +${STEPPED_GOAL_XP} XP earned` : `${fmtV(e, tg - v)} more ${u} for +${STEPPED_GOAL_XP} XP`}</span></div><div class="tgtile">${nextTile}</div></div>
+    <div class="tgbar" role="progressbar" aria-label="Today's target" aria-valuemin="0" aria-valuemax="${tg}" aria-valuenow="${v}"><i style="width:${Math.min(100, v / tg * 100)}%"></i></div>
+    ${rows}
+    <div class="tglinks"><details class="tglad"${ladderOpen ? " open" : ""}><summary>All checkpoints</summary><div class="tgtable"><span class="label">Daily</span><span class="label">Main plan</span><span class="label">Stretch</span>${lad}</div></details>${edit}</div>`;
+}
+document.addEventListener("toggle", ev => { if (ev.target.classList && ev.target.classList.contains("tglad")) ladderOpen = ev.target.open; }, true);
+function renderChart() {}
+
 function favTilesHTML(cur) {
   const k = moveDay(), d = day(k);
   return favExercises().map(x => {
@@ -843,6 +890,7 @@ function updateMoveLive() {
   const e = curEx(); if (tab !== "move" || !e) return;
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
   set("favRow", favTilesHTML(e)); set("todayCount", todayCountHTML(e)); set("levelBox", levelCard(levelNudge(e))); set("exStats", exStatsHTML(e)); set("moveLog", moveLogHTML());
+  set("tgGoal", goalCardHTML(e)); renderChart(e);
 }
 function animateTap(label) {
   const b = $("#bigBtn"); if (!b) return;
