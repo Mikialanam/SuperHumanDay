@@ -10,7 +10,7 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 | 3 | Goal form: set / edit / remove (start, final, step, start date, end date, optional stretch date) with live checkpoint preview | 25 min | done |
 | 4 | Trend chart (SVG): W / M / Y views, prev/next paging, dashed average, solid stepped target, stars on new bests, tap a bar for its value | 30 min | done |
 | 5 | Wiring: exercise picker, logging re-renders chart and target instantly, +50 XP when daily target is hit (toast) | 20 min | done |
-| 6 | Phone tests at 360x640 and 412x915 with Playwright, review screenshots, fix layout | 30 min | todo |
+| 6 | Phone tests at 360x640 and 412x915 with Playwright, review screenshots, fix layout | 30 min | done |
 | 7 | Publish to the Trailkin artifact link, final commit/push, handover notes | 15 min | todo |
 
 ## Done
@@ -20,9 +20,10 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 - Step 3: goal form (set/edit/remove, validation, live checkpoint preview, two-tap remove).
 - Step 4: SVG trend chart (Week/Month/Year, paging, dashed average, stepped target line, stars on all-time bests at that grain, tap a bar for value vs target). Average counts only periods since the exercise was first logged.
 - Step 5: logging re-renders goal card + chart on every tap (verified with Playwright), toast 'Daily target of N hit! +XP' when crossing the target; level-up message no longer overwritten.
+- Step 6: checked 360x640 and 412x915 (light + dark), Body/Health/Plan tabs, before/after stretch date. Fixed: duplicate y-ticks on small counts, legend showing unused items, wrapping goal subtitles, checkpoint table squeezed beside Edit goal, small nav arrows. No horizontal scroll, no console errors.
 
 ## Next
-- Step 6: phone screenshots + layout fixes.
+- Step 7: publish to the Trailkin artifact, handover.
 
 ## Blocked
 

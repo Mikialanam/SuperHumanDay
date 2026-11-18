@@ -168,7 +168,9 @@ details.lad summary{cursor:pointer;font-weight:800;color:var(--sky);padding:4px 
 .lg-a{border-top:2px dashed var(--ink);opacity:.75}
 .lg-t{border-top:2px solid var(--leaf)}
 .star-k{color:var(--sun);-webkit-text-stroke:.5px var(--ink);font-size:1rem}
-.glinks{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.glinks{position:relative}
+.glinks details{padding-right:90px}.glinks details[open]{padding-right:0}
+.glinks #goaledit{position:absolute;right:0;top:0}
 </style>
 
 <div class="wrap">
@@ -462,7 +464,7 @@ function renderChart(g){
   const box=$("chartbox"),{B,title,avg}=chartBars(g),u=esc(g.unit),tk=today();
   if(tbar!=null&&!B[tbar])tbar=null;
   const W=Math.max(260,Math.round(box.clientWidth||320)),H=210,pl=2,pr=40,pt=22,pb=26,pw=W-pl-pr,ph=H-pt-pb;
-  const maxV=Math.max(1,avg,...B.map(x=>Math.max(x.v||0,x.t||0))),st=niceStep(maxV*1.05),ymax=st*Math.ceil(maxV*1.05/st);
+  const maxV=Math.max(1,avg,...B.map(x=>Math.max(x.v||0,x.t||0))),st=Math.max(1,niceStep(maxV*1.05)),ymax=st*Math.ceil(maxV*1.05/st);
   const y=v=>pt+ph*(1-v/ymax),slot=pw/B.length,bw=Math.min(slot*.62,40),f1=n=>+n.toFixed(1);
   let s="";
   for(let v=0;v<=ymax+1e-9;v+=st)s+=`<line x1="${pl}" x2="${pl+pw}" y1="${f1(y(v))}" y2="${f1(y(v))}" class="${v?"grid":"base"}"/><text x="${W-2}" y="${f1(y(v)+4)}" class="ytick">${r0(v)}</text>`;
@@ -480,10 +482,11 @@ function renderChart(g){
   const read=sel?`<span class="label">${esc(sel.full)}</span><b>${sel.v==null?"–":r0(sel.v)}<small> ${u}</small></b><span class="note">${sel.t?`Target ${r0(sel.t)}${sel.v!=null?(sel.v>=sel.t?" · hit ✓":` · ${r0(sel.t-sel.v)} short`):""}`:"No target set"}${sel.star?" · ★ new best":""}</span>`
     :`<span class="label">${per} average</span><b>${r0(avg)}<small> ${u}</small></b><span class="note">${esc(title)}</span>`;
   const hasT=B.some(x=>x.t!=null),hasS=B.some(x=>x.star);
+  const empty=!B.some(x=>x.v)&&!B.some(x=>x.t!=null);
   box.innerHTML=`<div class="seg" role="group" aria-label="Time range">${[["W","Week"],["M","Month"],["Y","Year"]].map(([v,l])=>`<button type="button" data-view="${v}" aria-pressed="${tview===v}">${l}</button>`).join("")}</div>
   <div class="rhead"><div class="readout">${read}</div><div class="nav"><button type="button" data-nav="1" aria-label="Previous ${per==="Daily"?"week":per==="Weekly"?"month":"year"}">${CHEV("M10 3 5 8l5 5")}</button><button type="button" data-nav="-1" aria-label="Next ${per==="Daily"?"week":per==="Weekly"?"month":"year"}" ${toff?"":"disabled"}>${CHEV("M6 3l5 5-5 5")}</button></div></div>
   <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(g.name)}, ${per.toLowerCase()} totals for ${esc(title)}. Average ${r0(avg)}.">${s}</svg>
-  <div class="legend"><span><i class="lg-a"></i>Average</span>${hasT?`<span><i class="lg-t"></i>Target</span>`:""}${hasS?`<span><b class="star-k">★</b>New best</span>`:""}</div>`;
+  ${empty?`<span class="note">Nothing logged in this ${per==="Daily"?"week":per==="Weekly"?"month":"year"} yet.</span>`:""}<div class="legend">${avg>0?`<span><i class="lg-a"></i>Average</span>`:""}${hasT?`<span><i class="lg-t"></i>Target</span>`:""}${hasS?`<span><b class="star-k">★</b>New best</span>`:""}</div>`;
 }
 document.addEventListener("click",e=>{
   const h=e.target.closest&&e.target.closest("[data-bar]");
