@@ -205,6 +205,36 @@ const goals=()=>BUILTIN.concat(custom);
 const getDay=k=>days[k]?JSON.parse(JSON.stringify(days[k])):{beers:0,log:[]};
 const now=()=>{const d=new Date();return pad2(d.getHours())+":"+pad2(d.getMinutes())};
 
+// ---- stepped goals: kept in this browser only (localStorage), never synced ----
+// A goal: {start, final, step, from, by, stretch?}. Checkpoints are spread evenly from `from` to `by`
+// (and, for the stretch, from `from` to `stretch`); the daily target rises at each one.
+const LST="trailkin-targets",TARGET_XP=50;
+const dk=k=>new Date(k+"T12:00");
+const addDays=(k,n)=>{const d=dk(k);d.setDate(d.getDate()+n);return key(d)};
+const diffDays=(a,b)=>Math.round((dk(b)-dk(a))/864e5);
+const fmtD=(k,o)=>dk(k).toLocaleDateString(undefined,o||{month:"short",day:"numeric"});
+const SEED={burpees:{start:50,final:100,step:10,from:"2026-11-18",by:"2027-03-30",stretch:"2026-12-25"}};
+let targets=null;
+try{const raw=localStorage.getItem(LST);targets=raw?JSON.parse(raw):null}catch{}
+if(!targets||typeof targets!=="object"){targets=JSON.parse(JSON.stringify(SEED));try{localStorage.setItem(LST,JSON.stringify(targets))}catch{}}
+const saveTargets=()=>{try{localStorage.setItem(LST,JSON.stringify(targets))}catch{}};
+const ladderCache=new Map();
+function ladder(t,end){ // [{k:date,v:target}], first entry is the starting target
+  const ck=JSON.stringify(t)+end;if(ladderCache.has(ck))return ladderCache.get(ck);
+  const n=Math.max(1,Math.ceil((t.final-t.start)/Math.max(1,t.step))),span=Math.max(0,diffDays(t.from,end));
+  const out=[{k:t.from,v:t.start}];
+  for(let i=1;i<=n;i++)out.push({k:addDays(t.from,Math.round(i*span/n)),v:i===n?t.final:t.start+i*t.step});
+  ladderCache.set(ck,out);return out;
+}
+function targetOn(t,k,end){if(!t||k<t.from)return null;let v=null;for(const c of ladder(t,end||t.by))if(c.k<=k)v=c.v;return v}
+// pace: average over the last 7 finished days of the goal vs what the schedule asked for on those days
+function pace(id,t,end){
+  const tk=today();let a=0,need=0,n=0;
+  for(let i=7;i>=1;i--){const k=addDays(tk,-i);if(k<t.from)continue;a+=(days[k]&&days[k][id])||0;need+=targetOn(t,k,end);n++}
+  if(!n){const v=(days[tk]&&days[tk][id])||0;return{basis:"today",a:v,need:targetOn(t,tk,end)||t.start,n:0}}
+  return{basis:"7d",a:a/n,need:need/n,n};
+}
+
 function quests(d){return[
  {t:"Do at least 5 burpees",ok:(d.burpees||0)>=5},
  {t:"Hang, negatives, tilt or horse stance",ok:(d.hang||0)+(d.negatives||0)+(d.horse||0)+(d.tilt||0)>0},
@@ -218,6 +248,7 @@ function dayXP(d,k){
     if(g.kind==="count")x+=v*g.xp;else if(g.kind==="check")x+=g.xp;
     else if(g.id==="steps")x+=Math.floor(v/1000)*10;else if(g.kind==="weight")x+=5;}
   if(quests(d).every(q=>q.ok))x+=50;
+  for(const id in targets){const tg=targetOn(targets[id],k);if(tg&&(d[id]||0)>=tg)x+=TARGET_XP}
   if(k!==today()&&(d.log||[]).length)x+=d.beers===0?30:d.beers<=2?20:0;
   return Math.round(x);
 }
