@@ -11,7 +11,7 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 | 4 | Trend chart (SVG): W / M / Y views, prev/next paging, dashed average, solid stepped target, stars on new bests, tap a bar for its value | 30 min | done |
 | 5 | Wiring: exercise picker, logging re-renders chart and target instantly, +50 XP when daily target is hit (toast) | 20 min | done |
 | 6 | Phone tests at 360x640 and 412x915 with Playwright, review screenshots, fix layout | 30 min | done |
-| 7 | Publish to the Trailkin artifact link, final commit/push, handover notes | 15 min | todo |
+| 7 | Publish to the Trailkin artifact link, final commit/push, handover notes | 15 min | done |
 
 ## Done
 - Step 1: goal model in localStorage (`trailkin-targets`), burpee goal seeded, even checkpoints verified (60 Dec 14, 70 Jan 10, 80 Feb 5, 90 Mar 4, 100 Mar 30; stretch every ~7 days to Dec 25), +50 XP per day the target is hit.
@@ -21,12 +21,19 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 - Step 4: SVG trend chart (Week/Month/Year, paging, dashed average, stepped target line, stars on all-time bests at that grain, tap a bar for value vs target). Average counts only periods since the exercise was first logged.
 - Step 5: logging re-renders goal card + chart on every tap (verified with Playwright), toast 'Daily target of N hit! +XP' when crossing the target; level-up message no longer overwritten.
 - Step 6: checked 360x640 and 412x915 (light + dark), Body/Health/Plan tabs, before/after stretch date. Fixed: duplicate y-ticks on small counts, legend showing unused items, wrapping goal subtitles, checkpoint table squeezed beside Edit goal, small nav arrows. No horizontal scroll, no console errors.
+- Step 7: published as version 5 of the Trailkin artifact (https://claude.ai/artifact/6dW15DDXN2U58c2bNs4bHY), same db/user capabilities as before.
+
+## Handover
+- Goal settings live only in this browser's localStorage (`trailkin-targets`); day logs still also sync to the account when the artifact runtime offers it (unchanged from before).
+- Tunables in Index.html: `TARGET_XP` (50), `SEED` (burpee goal), pace thresholds in `paceRow` (>=100% on pace, >=85% close), Monday week start in `monOf`.
 
 ## Next
-- Step 7: publish to the Trailkin artifact, handover.
+- Run complete. Pick from Later if wanted.
 
 ## Blocked
 
 ## Later
+- Choose Sunday vs Monday week start.
+- Optional extra XP for hitting the stretch target.
 - Custom set size when logging (e.g. +7) instead of the fixed +5 button.
 - Optional quest tied to the daily target instead of "at least 5 burpees".
