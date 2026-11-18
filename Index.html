@@ -617,13 +617,14 @@ function renderForm(){
   $("ng-name").focus();
 }
 let tt;function toast(m){const el=$("toast");el.textContent=m;el.classList.add("show");clearTimeout(tt);tt=setTimeout(()=>el.classList.remove("show"),2600)}
-function commit(k,d){const before=lvlFor(stats().xp);days[k]=d;render();store.saveDay(k,d);const after=lvlFor(stats().xp);if(after>before)toast(`Level up! You're level ${after}`)}
+function commit(k,d,msg){const before=lvlFor(stats().xp);days[k]=d;render();store.saveDay(k,d);const after=lvlFor(stats().xp);if(after>before)msg=(msg?msg+" · ":"")+`Level up! You're level ${after}`;if(msg)toast(msg)}
 document.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.tab){tab=b.dataset.tab;formOpen=false;confirmId=null;goalFormOpen=false;$("goalform").hidden=true;try{localStorage.setItem("trailkin-tab",tab)}catch{}render();return}
   if(b.dataset.g){const g=goals().find(x=>x.id===b.dataset.g),k=today(),d=getDay(k);d.log=d.log||[];
-    if(g.kind==="check"){const prev=d[g.id]||0;d[g.id]=prev?0:1;d.log.push({k:g.id,v:d[g.id],prev,t:now()});commit(k,d);if(!prev)toast(`+${g.xp} XP`)}
-    else{d[g.id]=(d[g.id]||0)+g.step;d.log.push({k:g.id,v:g.step,t:now()});commit(k,d);toast(`+${Math.round(g.step*g.xp)} XP`)}
+    if(g.kind==="check"){const prev=d[g.id]||0;d[g.id]=prev?0:1;d.log.push({k:g.id,v:d[g.id],prev,t:now()});commit(k,d,prev?"":`+${g.xp} XP`)}
+    else{const was=d[g.id]||0,tg=targets[g.id]?targetOn(targets[g.id],k):null,xp=Math.round(g.step*g.xp);d[g.id]=was+g.step;d.log.push({k:g.id,v:g.step,t:now()});
+      commit(k,d,tg&&was<tg&&d[g.id]>=tg?`Daily target of ${tg} hit! +${xp+TARGET_XP} XP`:`+${xp} XP`)}
     return}
   if(b.dataset.save){const id=b.dataset.save,raw=+$(id).value;if(!raw||raw<0){toast(id==="weight"?"Enter your weight in kg":id==="waist"?"Enter your waist in cm":"Enter your steps");return}
     const v=id==="steps"?Math.round(raw):Math.round(raw*10)/10,k=today(),d=getDay(k);d.log=d.log||[];const prev=d[id]||0;d[id]=v;d.log.push({k:id,v,prev,t:now()});commit(k,d);toast(id==="weight"?`Weighed in: ${v} kg`:id==="waist"?`Waist saved: ${v} cm`:`Steps saved: ${v.toLocaleString()}`);return}

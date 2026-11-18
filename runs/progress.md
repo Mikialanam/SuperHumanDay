@@ -9,7 +9,7 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 | 2 | Goal card: today's target + progress bar, next checkpoint + date, pace for main and stretch, checkpoint ladder | 25 min | done |
 | 3 | Goal form: set / edit / remove (start, final, step, start date, end date, optional stretch date) with live checkpoint preview | 25 min | done |
 | 4 | Trend chart (SVG): W / M / Y views, prev/next paging, dashed average, solid stepped target, stars on new bests, tap a bar for its value | 30 min | done |
-| 5 | Wiring: exercise picker, logging re-renders chart and target instantly, +50 XP when daily target is hit (toast) | 20 min | todo |
+| 5 | Wiring: exercise picker, logging re-renders chart and target instantly, +50 XP when daily target is hit (toast) | 20 min | done |
 | 6 | Phone tests at 360x640 and 412x915 with Playwright, review screenshots, fix layout | 30 min | todo |
 | 7 | Publish to the Trailkin artifact link, final commit/push, handover notes | 15 min | todo |
 
@@ -19,9 +19,10 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 - Step 2: goal card (today's target + bar, next checkpoint, main/stretch pace pills, checkpoint table). Pace = last 7 finished days' average vs what the plan asked for; first day uses today so far.
 - Step 3: goal form (set/edit/remove, validation, live checkpoint preview, two-tap remove).
 - Step 4: SVG trend chart (Week/Month/Year, paging, dashed average, stepped target line, stars on all-time bests at that grain, tap a bar for value vs target). Average counts only periods since the exercise was first logged.
+- Step 5: logging re-renders goal card + chart on every tap (verified with Playwright), toast 'Daily target of N hit! +XP' when crossing the target; level-up message no longer overwritten.
 
 ## Next
-- Step 5: wiring + XP toast.
+- Step 6: phone screenshots + layout fixes.
 
 ## Blocked
 
