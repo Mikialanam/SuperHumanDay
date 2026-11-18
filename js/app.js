@@ -76,6 +76,16 @@ const DEFAULT_EXERCISES = [
   { id: "lift", name: "Lifting session", type: "workout", xp: 60, medal: "Bar Lifter", tiers: [4, 12, 36, 100] },
 ];
 
+// Stepped goals (Move > Trends & goal). The daily target rises in even steps from a start date to a final date,
+// with an optional earlier stretch date. Change them in the app; this is only the starting set.
+const DEFAULT_PLANS = {
+  burpees: { start: 50, final: 100, step: 10, from: "2026-11-18", by: "2027-03-30", stretch: "2026-12-25" },
+};
+const STEPPED_GOAL_XP = 50;           // bonus XP on each day a stepped goal's daily target is hit
+const PACE_DAYS = 7;                  // the pace check averages this many finished days
+const PACE_CLOSE = 0.85;              // "Close" when that average is at least 85% of what the plan asked for
+const MAX_GOAL_STEPS = 60;            // most checkpoints one goal can have
+
 // Daily habits carried over from Trailkin (More > Habits). kind: check (once a day) or count.
 const DEFAULT_HABITS = [
   { id: "keto", area: "Health", name: "Keto day", kind: "check", xp: 15, medal: "Keto Keeper", tiers: [7, 30, 60, 120] },
@@ -225,7 +235,7 @@ function dayHasData(d) {
 function freshState() {
   return {
     app: "superhuman-day", version: DATA_VERSION, settings: clone(DEFAULT_SETTINGS),
-    exercises: clone(DEFAULT_EXERCISES), habits: clone(DEFAULT_HABITS), days: {},
+    exercises: clone(DEFAULT_EXERCISES), habits: clone(DEFAULT_HABITS), days: {}, plans: clone(DEFAULT_PLANS),
     meta: { created: new Date().toISOString(), lastBackup: null, lastOpenDay: null },
   };
 }
@@ -241,6 +251,9 @@ function normalize(s) {
   if (!Array.isArray(s.exercises) || !s.exercises.length) s.exercises = f.exercises;
   if (!Array.isArray(s.habits)) s.habits = f.habits;
   if (!s.days || typeof s.days !== "object") s.days = {};
+  // Stepped goals were added after version 2; data without them gets the starting set. An empty {} is kept (all removed).
+  if (!s.plans || typeof s.plans !== "object" || Array.isArray(s.plans)) s.plans = clone(DEFAULT_PLANS);
+  for (const id of Object.keys(s.plans)) if (planError(s.plans[id])) delete s.plans[id];
   const stepsId = ensureSteps(s);
   for (const k of Object.keys(s.days)) { if (!isDayKey(k) || !s.days[k] || typeof s.days[k] !== "object") delete s.days[k]; else migrateDay(normDay(s.days[k]), stepsId); }
   s.meta = Object.assign(f.meta, s.meta || {});
@@ -285,6 +298,43 @@ function favExercises() {
 }
 const curEx = () => { const e = exById(S.settings.lastExercise); return e && !e.archived ? e : activeExercises()[0]; };
 
+/* ---------- stepped goals ---------- */
+// A plan: { start, final, step, from, by, stretch? }. Checkpoints are spread evenly from `from` to `by`
+// (and, for the stretch schedule, from `from` to `stretch`); the daily target rises at each one.
+function planError(p) {
+  if (!p || typeof p !== "object") return "Missing goal.";
+  const n = v => Number.isFinite(v) && v === Math.round(v);
+  if (!n(p.start) || p.start < 1) return "Set a starting target of at least 1.";
+  if (!n(p.final) || p.final <= p.start) return "The final target needs to be higher than the start.";
+  if (!n(p.step) || p.step < 1) return "Raise the target by at least 1 at each step.";
+  if (!isDayKey(p.from) || !isDayKey(p.by)) return "Pick a start date and a final date.";
+  if (p.by <= p.from) return "The final date needs to be after the start date.";
+  if (p.stretch !== undefined && p.stretch !== null && p.stretch !== "" && !(isDayKey(p.stretch) && p.stretch > p.from && p.stretch < p.by)) return "The stretch date should fall between the start and final dates.";
+  if (Math.ceil((p.final - p.start) / p.step) > MAX_GOAL_STEPS) return `That's more than ${MAX_GOAL_STEPS} steps. Raise the target by more each time.`;
+  return "";
+}
+const ladderCache = new Map();
+function ladder(p, end) { // [{ k: date, v: daily target from that date }], the first entry is the starting target
+  const ck = JSON.stringify(p) + end; if (ladderCache.has(ck)) return ladderCache.get(ck);
+  const n = Math.max(1, Math.ceil((p.final - p.start) / p.step)), span = Math.max(0, daysBetween(p.from, end));
+  const out = [{ k: p.from, v: p.start }];
+  for (let i = 1; i <= n; i++) out.push({ k: addDays(p.from, Math.round(i * span / n)), v: i === n ? p.final : p.start + i * p.step });
+  if (ladderCache.size > 200) ladderCache.clear();
+  ladderCache.set(ck, out); return out;
+}
+function targetOn(p, k, end) { if (!p || k < p.from) return null; let v = null; for (const c of ladder(p, end || p.by)) if (c.k <= k) v = c.v; return v; }
+const planFor = e => e && (e.type === "reps" || e.type === "timed") && S.plans && S.plans[e.id] ? S.plans[e.id] : null;
+// The daily goal on a given day: the stepped goal's target once it has started, otherwise the exercise's plain goal.
+function goalFor(e, k) { const t = targetOn(planFor(e), k); return t !== null ? t : (e && e.goal) || 0; }
+// Pace: the average over the last PACE_DAYS finished days of the plan, against what the plan asked for on those days.
+// On the plan's first day there are no finished days yet, so it compares today so far.
+function pace(e, p, end) {
+  const t = todayKey(); let got = 0, need = 0, n = 0;
+  for (let i = PACE_DAYS; i >= 1; i--) { const k = addDays(t, -i); if (k < p.from) continue; got += exDone(day(k), e); need += targetOn(p, k, end); n++; }
+  if (!n) return { today: true, got: exDone(day(t), e), need: targetOn(p, t, end) || p.start, n: 0 };
+  return { today: false, got: got / n, need: need / n, n };
+}
+
 /* ---------- units ---------- */
 const lu = () => S.settings.unit;
 const toKg = (v, u = lu()) => u === "lb" ? v * KG_PER_LB : v;
@@ -306,6 +356,7 @@ function dayXP(d, k) {
   for (const id in d.reps) { const e = exById(id); if (e) x += d.reps[id] * e.xp; }
   for (const s of d.sets) { const e = exById(s.ex); if (e) x += s.r * e.xp; }
   for (const s of d.sessions) { const e = exById(s.ex); if (e) x += e.xp; }
+  for (const id in S.plans) { const e = exById(id), p = planFor(e), tg = targetOn(p, k); if (tg && exDone(d, e) >= tg) x += STEPPED_GOAL_XP; }
   for (const h of S.habits) { const v = d.habits[h.id]; if (v) x += h.kind === "check" ? h.xp : v * h.xp; }
   if (d.weight) x += WEIGH_IN_XP;
   x += d.breath.reduce((a, b) => a + b.sec, 0) / 60 * BREATH_XP_PER_MINUTE;
@@ -562,7 +613,7 @@ function nudges() {
   else for (const e of activeExercises().filter(e => e.nudge)) {
     const v = exDone(d, e), n = e.name.toLowerCase();
     if (!v) out.push({ ic: "⚡", text: `No ${n} yet today. ${e.type === "reps" ? `A quick set of ${S.settings.quick[0]}?` : e.type === "timed" ? "Even 20 seconds counts." : e.type === "weighted" ? "One set gets it going." : "Ready when you are."}`, act: "goex", ex: e.id, label: "Let's go" });
-    else if (e.goal && v < e.goal && e.type !== "workout") out.push({ ic: "⚡", text: `${e.type === "timed" ? fmtDur(e.goal - v) : e.goal - v} more ${n} to hit ${e.type === "timed" ? fmtDur(e.goal) : e.goal}. ${v} done already.`, act: "goex", ex: e.id, label: "Go" });
+    else { const g = goalFor(e, t); if (g && v < g && e.type !== "workout") out.push({ ic: "⚡", text: `${e.type === "timed" ? fmtDur(g - v) : (g - v).toLocaleString()} more ${n} to hit ${e.type === "timed" ? fmtDur(g) : g.toLocaleString()}${planFor(e) ? ", today's target" : ""}. ${v.toLocaleString()} done already.`, act: "goex", ex: e.id, label: "Go" }); }
   }
   if (S.settings.breathing && !d.breath.length) out.push({ ic: "🫁", text: "No breathing yet today, two minutes?", act: "gobreathe", label: "Breathe" });
   if ((hr >= EVENING_HOUR || afterMidnight()) && !d.moments.some(m => m.type === "win")) out.push({ ic: "★", text: "Any wins today? Small ones count.", act: "gowins", label: "Add one" });
@@ -682,7 +733,8 @@ function todayCountHTML(e) {
   const k = moveDay(), dw = esc(dayWord(k)), v = exDone(day(k), e);
   if (e.type === "weighted") { const n = day(k).sets.filter(s => s.ex === e.id).length; return `<b>${n}</b><span>${plural(n, "set")} ${dw} · ${v} reps</span>`; }
   if (e.type === "workout") return `<b>${v}</b><span>${plural(v, "workout")} ${dw}</span>`;
-  const goal = e.goal ? `<div class="goalbar" aria-label="Daily goal ${e.goal}"><i style="width:${Math.min(100, v / e.goal * 100)}%"></i></div><small>${v >= e.goal ? "Goal hit! Every extra one is a bonus." : `Goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal.toLocaleString()} · ${e.type === "timed" ? fmtDur(e.goal - v) : (e.goal - v).toLocaleString()} to go`}</small>` : "";
+  const g = goalFor(e, k), stepped = targetOn(planFor(e), k) !== null;
+  const goal = g ? `<div class="goalbar" aria-label="Daily goal ${g}"><i style="width:${Math.min(100, v / g * 100)}%"></i></div><small>${v >= g ? `Goal hit!${stepped ? ` +${STEPPED_GOAL_XP} XP.` : ""} Every extra one is a bonus.` : `${stepped ? "Target" : "Goal"} ${e.type === "timed" ? fmtDur(g) : g.toLocaleString()} · ${e.type === "timed" ? fmtDur(g - v) : (g - v).toLocaleString()} to go`}</small>` : "";
   return `<b>${e.type === "timed" ? fmtDur(v) : v.toLocaleString()}</b><span>${e.type === "timed" ? dw : esc(e.name.toLowerCase()) + " " + dw}</span>${goal}`;
 }
 function entryText(d, x) {
@@ -783,7 +835,7 @@ function favTilesHTML(cur) {
   const k = moveDay(), d = day(k);
   return favExercises().map(x => {
     const v = exDone(d, x), show = x.type === "timed" ? fmtDur(v) : v.toLocaleString();
-    const sub = x.type === "weighted" ? `${d.sets.filter(s => s.ex === x.id).length} sets` : x.type === "workout" ? `${v} done` : x.goal ? `${show} / ${x.type === "timed" ? fmtDur(x.goal) : x.goal.toLocaleString()}` : show;
+    const g = goalFor(x, k), sub = x.type === "weighted" ? `${d.sets.filter(s => s.ex === x.id).length} sets` : x.type === "workout" ? `${v} done` : g ? `${show} / ${x.type === "timed" ? fmtDur(g) : g.toLocaleString()}` : show;
     return `<button class="favbtn" data-act="fav" data-ex="${esc(x.id)}" aria-pressed="${!!cur && x.id === cur.id}"><b>${esc(x.name)}</b><small>${sub} ${esc(dayWord(k))}</small></button>`;
   }).join("");
 }
@@ -807,7 +859,8 @@ function addReps(n, label) {
   mutate(() => { const d = dayW(k); d.log.push({ k: "reps", ex: e.id, v: n, t: nowTime(), id: uid() }); recalcReps(d); }, { rerender: false });
   sfx("tap"); buzz(); animateTap(label || (e.type === "timed" ? "+" + fmtDur(n) : "+" + n));
   const after = before + n;
-  if (e.goal && before < e.goal && after >= e.goal) { sfx("win"); celebrate(); toast(`${e.type === "timed" ? fmtDur(e.goal) : e.goal.toLocaleString()} ${e.name.toLowerCase()} ${dayWord(k)}. Goal hit!`); }
+  const g = goalFor(e, k), stepped = targetOn(planFor(e), k) !== null;
+  if (g && before < g && after >= g) { sfx("win"); celebrate(); toast(`${e.type === "timed" ? fmtDur(g) : g.toLocaleString()} ${e.name.toLowerCase()} ${dayWord(k)}. ${stepped ? `Daily target hit! +${STEPPED_GOAL_XP} XP` : "Goal hit!"}`); }
   else if (rs.best && before <= rs.best.v && after > rs.best.v) { sfx("win"); toast(`New best day: ${e.type === "timed" ? fmtDur(after) : after.toLocaleString()} ${e.name.toLowerCase()}!`); }
   else if (k !== todayKey() && n > 1) toast(`Added ${e.type === "timed" ? fmtDur(n) : n.toLocaleString()} to ${fmtDate(k)}`);
   updateMoveLive();
@@ -1099,7 +1152,7 @@ function planHTML() {
       <li>Constipation: more vegetables, water to thirst, magnesium.</li></ul></div></div>`;
 }
 function exercisesHTML() {
-  return `<ul class="exlist">${activeExercises().map(e => `<li><div><b>${esc(e.name)}</b><small>${TYPE_LABEL[e.type]} · ${xpText(e)}${e.goal ? ` · goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal}/day` : ""}${e.nudge ? " · daily nudge" : ""}${favExercises().some(x => x.id === e.id) ? " · big button" : ""}</small></div><button class="btn small" data-act="editex" data-ex="${esc(e.id)}">Edit</button></li>`).join("")}</ul>
+  return `<ul class="exlist">${activeExercises().map(e => `<li><div><b>${esc(e.name)}</b><small>${TYPE_LABEL[e.type]} · ${xpText(e)}${planFor(e) ? ` · stepped goal ${planFor(e).start}→${planFor(e).final}/day` : e.goal ? ` · goal ${e.type === "timed" ? fmtDur(e.goal) : e.goal}/day` : ""}${e.nudge ? " · daily nudge" : ""}${favExercises().some(x => x.id === e.id) ? " · big button" : ""}</small></div><button class="btn small" data-act="editex" data-ex="${esc(e.id)}">Edit</button></li>`).join("")}</ul>
     <button class="btn ghostbtn" data-act="newex">+ Add an exercise or workout</button>
     ${S.exercises.some(e => e.archived) ? `<p class="note">Hidden: ${S.exercises.filter(e => e.archived).map(e => `<button class="linkbtn" data-act="unhide" data-ex="${esc(e.id)}">${esc(e.name)} (show)</button>`).join(" ")}</p>` : ""}`;
 }
@@ -1190,6 +1243,7 @@ function exerciseSheet(id) {
       ${used ? `<small class="note">Type is locked because this exercise has history.</small>` : ""}</div>
     <div class="two"><div class="field"><label for="exXP" id="exXPl">${XP_LABEL[type]}</label><input id="exXP" type="number" inputmode="decimal" step="any" min="0" value="${e ? e.xp : type === "workout" ? 30 : DEFAULT_XP_PER_REP}"></div>
       <div class="field" id="exGoalF" ${type === "workout" || type === "weighted" ? "hidden" : ""}><label for="exGoal">Daily goal${type === "timed" ? " (seconds)" : ""}</label><input id="exGoal" type="number" inputmode="numeric" min="0" value="${e && e.goal ? e.goal : ""}" placeholder="Optional"></div></div>
+    ${planFor(e) ? `<p class="note">${esc(e.name)} has a stepped goal, so its daily target (${targetOn(planFor(e), todayKey()) ?? planFor(e).start} today) is used instead of this number. Change it under Trends &amp; goal on the Move page.</p>` : ""}
     <label class="switchrow" id="exTapF" ${type === "reps" ? "" : "hidden"}><span><b>Big +1 button</b><small>Turn off for things you type in, like steps</small></span><input type="checkbox" class="sw" id="exTap" ${!e || e.tap !== false ? "checked" : ""}></label>
     <label class="switchrow"><span><b>Big button on Move</b><small>Up to ${MAX_FAVORITES}. The rest sit behind More.</small></span><input type="checkbox" class="sw" id="exFav" ${e && favExercises().some(x => x.id === e.id) ? "checked" : ""}></label>
     <label class="switchrow"><span><b>Daily nudge</b><small>Remind me on the Today screen if I haven't done it</small></span><input type="checkbox" class="sw" id="exNudge" ${e && e.nudge ? "checked" : ""}></label>
