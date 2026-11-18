@@ -1298,6 +1298,53 @@ function exerciseSheet(id) {
     <div class="row2"><button class="btn primary" type="submit">${e ? "Save" : "Add"}</button><button class="btn" type="button" data-act="closesheet">Cancel</button></div>
     ${e ? `<button class="btn danger" type="button" data-act="hideex" data-ex="${esc(e.id)}">Hide this exercise</button><p class="note">Hiding keeps its history and XP. You can show it again from More > Exercises.</p>` : ""}</form>`);
 }
+/* Stepped goal: set, edit or remove. Checkpoints are previewed as you type. */
+function planSheet(exId) {
+  const e = exById(exId); if (!e) return;
+  const p = planFor(e), t = todayKey(), timed = e.type === "timed";
+  let d = p;
+  if (!d) { // start from what you've been doing lately
+    let got = 0, n = 0; for (let i = 1; i <= 7; i++) { const v = exDone(day(addDays(t, -i)), e); if (v) { got += v; n++; } }
+    const start = Math.max(1, Math.round(n ? got / n : (e.goal || 10)));
+    d = { start, final: start * 2, step: Math.max(1, Math.round(start / 5)), from: t, by: addDays(t, 120), stretch: "" };
+  }
+  const unit = timed ? " (seconds)" : "";
+  openSheet(`<form data-form="plan" data-ex="${esc(e.id)}" novalidate><h2>${p ? "Edit" : "New"} stepped goal · ${esc(e.name)}</h2>
+    <p class="note">Set where you start, where you want to be and by when. The app spreads even checkpoints in between and raises the daily target at each one.</p>
+    <div class="two"><div class="field"><label for="plStart">Start target / day${unit}</label><input id="plStart" type="number" inputmode="numeric" min="1" value="${d.start}"></div>
+      <div class="field"><label for="plFinal">Final target / day${unit}</label><input id="plFinal" type="number" inputmode="numeric" min="2" value="${d.final}"></div></div>
+    <div class="two"><div class="field"><label for="plStep">Raise by at each step</label><input id="plStep" type="number" inputmode="numeric" min="1" value="${d.step}"></div>
+      <div class="field"><label for="plFrom">Start date</label><input id="plFrom" type="date" value="${d.from}"></div></div>
+    <div class="two"><div class="field"><label for="plBy">Final target by</label><input id="plBy" type="date" value="${d.by}"></div>
+      <div class="field"><label for="plStretch">Stretch date (optional)</label><input id="plStretch" type="date" value="${d.stretch || ""}"></div></div>
+    <div class="tgprev" id="plPrev" aria-live="polite"></div>
+    <div class="row2"><button class="btn primary" type="submit">Save goal</button><button class="btn" type="button" data-act="closesheet">Cancel</button></div>
+    ${p ? `<button class="btn danger" type="button" data-act="plandel" data-ex="${esc(e.id)}">Remove stepped goal</button>` : ""}</form>`, false);
+  planPreview();
+}
+function readPlan() {
+  const n = id => Math.round(parseFloat($(id).value)), p = { start: n("#plStart"), final: n("#plFinal"), step: n("#plStep"), from: $("#plFrom").value, by: $("#plBy").value };
+  if ($("#plStretch").value) p.stretch = $("#plStretch").value;
+  return { p, err: planError(p) };
+}
+function planPreview() {
+  const el = $("#plPrev"); if (!el) return;
+  const { p, err } = readPlan(), e = exById($('form[data-form="plan"]').dataset.ex);
+  if (err) { el.innerHTML = `<p class="warn">${esc(err)}</p>`; return; }
+  const line = L => L.map(c => `<span>${fmtV(e, c.v)} <small>${fmtDate(c.k, { month: "short", day: "numeric" })}</small></span>`).join("");
+  el.innerHTML = `<p class="sublabel">Checkpoints</p><div class="tgsteps">${line(ladder(p, p.by))}</div>${p.stretch ? `<p class="sublabel">Stretch schedule</p><div class="tgsteps">${line(ladder(p, p.stretch))}</div>` : ""}`;
+}
+function savePlan(f) {
+  const { p, err } = readPlan(); if (err) { planPreview(); toast(err); return; }
+  const id = f.dataset.ex; closeSheet();
+  mutate(() => { S.plans[id] = p; });
+  toast(`Goal saved: ${p.start.toLocaleString()} → ${p.final.toLocaleString()} a day`);
+}
+function deletePlan(id) {
+  const e = exById(id); if (!confirm(`Remove the stepped goal for ${e ? e.name : "this exercise"}? Your logged ${e ? e.name.toLowerCase() : "entries"} are kept.`)) return;
+  closeSheet(); mutate(() => { delete S.plans[id]; }); toast("Stepped goal removed");
+}
+
 function habitSheet() {
   openSheet(`<form data-form="habit"><h2>New habit</h2>
     <div class="field"><label for="hName">Name</label><input id="hName" required maxlength="40" placeholder="e.g. Glass of water, Meditation"></div>
@@ -1394,6 +1441,8 @@ document.addEventListener("click", ev => {
     case "editex": exerciseSheet(ds.ex); break;
     case "newex": exerciseSheet(null); break;
     case "closesheet": closeSheet(); break;
+    case "plannew": case "planedit": planSheet(ds.ex); break;
+    case "plandel": deletePlan(ds.ex); break;
     case "hideex": { const e = exById(ds.ex); if (!e || !confirm(`Hide ${e.name}? Its history and XP are kept.`)) break; e.archived = true; if (S.settings.lastExercise === e.id) S.settings.lastExercise = (activeExercises()[0] || {}).id; save(); closeSheet(); render(); toast(`${e.name} hidden`); break; }
     case "unhide": { const e = exById(ds.ex); if (e) { e.archived = false; save(); render(); } break; }
     case "tmode": timer.mode = ds.m; timer.running = false; timer.elapsed = 0; ensureTicker(); openSection = "timer"; render(); break;
@@ -1445,6 +1494,7 @@ document.addEventListener("input", ev => {
   const t = ev.target;
   if (t.dataset.top3 !== undefined) { const d = dayW(winsDate), i = +t.dataset.top3; d.top3[i].text = t.value; if (!t.value.trim()) d.top3[i].done = false; save(); return; }
   if (t.id === "wIn" || t.id === "rIn") syncSetPreview();
+  if (t.id && t.id.startsWith("pl") && t.closest('form[data-form="plan"]')) planPreview();
 });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Enter" && ev.target.dataset && ev.target.dataset.top3 !== undefined) {
@@ -1455,6 +1505,7 @@ document.addEventListener("keydown", ev => {
 document.addEventListener("submit", ev => {
   const f = ev.target, kind = f.dataset.form; if (!kind) return; ev.preventDefault();
   if (kind === "entry") { saveEntry(f); return; }
+  if (kind === "plan") { savePlan(f); return; }
   if (kind === "typein") {
     const i = $("#typeN"), n = parseInt(i.value, 10), e = curEx(), max = e && e.type === "timed" ? MAX_ENTRY_SECONDS : MAX_ENTRY_NUMBER;
     if (!(n > 0)) { toast("Type a number first"); return; }

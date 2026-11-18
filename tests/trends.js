@@ -53,6 +53,15 @@ const noHScroll = page => page.evaluate(() => document.documentElement.scrollWid
     ok((await page.textContent("#tgTitle")).trim() === "Trends & goal", 'title reads "Trends & goal"');
     await scrollTo(page, ".tgpanel"); await shot(page, `${size.name}-goal`);
     ok(await noHScroll(page), "no sideways scrolling");
+
+    // goal sheet: preview, validation, save
+    await page.click('[data-act="planedit"]');
+    ok((await page.textContent("#plPrev")).includes("60") && (await page.textContent("#plPrev")).includes("Dec 14"), "sheet previews the checkpoints (60 on Dec 14)");
+    await shot(page, `${size.name}-sheet`);
+    await page.fill("#plStretch", "2027-05-01");
+    ok((await page.textContent("#plPrev")).includes("stretch date should fall between"), "a stretch date after the final date is refused");
+    await page.fill("#plStretch", "2026-12-25");
+    await page.click('[data-act="closesheet"]');
     await ctx.close();
   }
   await browser.close();

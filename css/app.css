@@ -437,3 +437,11 @@ details.panel:not([open]) { gap: 0; }
 .tgtable .past { color: var(--muted); }
 .tgtable .cur { color: var(--accent); font-weight: 750; }
 .tgempty { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.tgprev { display: flex; flex-direction: column; gap: 4px; }
+.tgprev .sublabel { margin: 2px 0 0; }
+.tgsteps { display: flex; flex-wrap: wrap; gap: 6px; }
+.tgsteps span { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 4px 8px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tgsteps small { color: var(--muted); font-weight: 600; }
+.sheetbox input[type=date] { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); font-size: 16px; }
+.sheetbox .two > .field { min-width: 0; }
+.sheetbox input[type=date] { min-width: 0; max-width: 100%; padding: 10px 8px; -webkit-appearance: none; appearance: none; }
