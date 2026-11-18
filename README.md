@@ -34,6 +34,13 @@ The first time you open the app each day, it starts here:
 - Every rep earns XP. XP per rep can be set per exercise. The level bar always tells you what's next, for example "12 more burpees to level 6".
 - Optional daily goal per exercise (burpees start at 50, steps at 8,000), plus a daily nudge.
 
+### Trends & goal (on the Move page, under the big button)
+- **Stepped goal** for any reps or timed exercise. Set a starting daily target, a final target, a date to reach it by, how much to raise it at each step, and an optional earlier **stretch date**. The app spreads even checkpoints in between and raises the daily target at each one. Burpees start with: 50 a day from Nov 18, 2026, rising by 10 to 100 a day by Mar 30, 2027 (60 Dec 14, 70 Jan 10, 80 Feb 5, 90 Mar 4), stretch 100 by Dec 25, 2026.
+- The card shows **today's target** with a progress bar, the **next checkpoint** and its date, and whether you're **on pace** for the main goal and the stretch goal: your average over the last 7 finished days against what the plan asked for on those days (85% or more is "Close"). On a goal's first day it compares today so far. *All checkpoints* lists both schedules.
+- Hitting the day's target earns **+50 XP** and a celebration. The stepped target also drives the goal bar under the big button, the big-button tiles and the Today nudges.
+- **Trend chart** like the iPhone Health app: **Week** (a bar per day, Monday to Sunday), **Month** (weekly totals, each week labelled by its Monday) and **Year** (monthly totals). Arrows go back in time. A dashed line shows the average of the periods so far, a solid line the target (it steps up at each checkpoint), and a ★ marks any bar that beats every earlier day, week or month. Tap a bar for its total and target.
+- Everything updates the moment you log, undo or edit an entry.
+
 ### Logging to a past day, and late nights
 - Under the exercise name: **Today**, **Yesterday**, or **Older…** to pick any earlier date. Future dates aren't allowed.
 - When you're logging to another day, a yellow banner says so ("Logging to Fri, Nov 13") and the big button shows the date. The app goes back to today when you leave the Move page, or after 5 minutes away from the app, so nothing lands on the wrong day by accident.
@@ -99,6 +106,10 @@ All tunable values are named constants at the top of [`js/app.js`](js/app.js):
 | `STEPS_XP_PER_1000` | XP for steps | 10 |
 | `TOP3_ITEM_XP`, `SUPERHUMAN_DAY_BONUS_XP` | XP for top-3 items and the Superhuman Day bonus | 10, 50 |
 | `SUPERHUMAN_DAY_TOP3_NEEDED` | How many top-3 items must be done | 3 |
+| `DEFAULT_PLANS` | Stepped goals you start with (only used when there are none saved) | Burpees 50 → 100 |
+| `STEPPED_GOAL_XP` | Bonus XP each day a stepped goal's target is hit | 50 |
+| `PACE_DAYS`, `PACE_CLOSE` | Days the pace check averages, and the share of the plan that counts as "Close" | 7, 0.85 |
+| `MAX_GOAL_STEPS` | Most checkpoints one goal can have | 60 |
 | `BACKUP_REMINDER_DAYS` | When the backup nudge appears | 7 |
 | `DEFAULT_EXERCISES`, `DEFAULT_HABITS`, `BREATH_PATTERNS` | Starting exercises, habits and breathing patterns | |
 
@@ -109,6 +120,8 @@ Everything is stored as one JSON object in `localStorage`. The same object is th
 
 - **Version 1** kept a running total per exercise per day.
 - **Version 2** (this version) gives every exercise entry its own id, so it can be edited, moved or deleted, and day totals are worked out from the entries. Steps saved under Habits become entries on the Steps exercise.
+
+Stepped goals live in the same object under `plans` (one entry per exercise), so they're in every backup. Data or backups from before stepped goals existed get the starting burpee goal; if you remove every goal, that stays removed.
 
 The upgrade runs automatically when the app opens and whenever a backup is imported, so old backups keep working. It keeps every total exactly: if an old day total doesn't match its entries, an "earlier total" entry makes up the difference. Before upgrading for the first time, the app keeps an untouched copy of your version 1 data on the device (`superhuman-day-before-v2`). If you had already made your own "Steps" exercise, that one becomes the Steps big button, and any old Habits steps go into a hidden built-in Steps exercise so your XP doesn't change.
 
@@ -123,6 +136,7 @@ manifest.webmanifest   home screen install
 sw.js                  offline support (caches app files only, never your data)
 icons/                 app icons
 tests/smoke.js         developer smoke test (not part of the app)
+tests/trends.js        developer test for Trends & goal at 360×640 and 412×915
 RUNLOG.md              what changed in each update, and how it was checked
 ```
 
@@ -142,5 +156,11 @@ node tests/smoke.js
 
 Set `OLD=<url of the previous version>` to also check that upgraded data scores exactly the same XP, levels and streaks as before.
 
+`tests/trends.js` checks the stepped goal, pace, chart, XP bonus, undo, dark mode and a date after the stretch date, on 360×640 and 412×915 screens, and saves screenshots to `trend-shots/`:
+
+```bash
+node tests/trends.js
+```
+
 ## Publish with GitHub Pages
-Settings → Pages → *Deploy from a branch* → choose the branch and `/ (root)` → Save.
+`main` holds the live version. Settings → Pages → *Build and deployment* → Source: *Deploy from a branch* → Branch: `main`, folder `/ (root)` → Save.

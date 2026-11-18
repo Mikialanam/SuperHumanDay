@@ -2,6 +2,31 @@
 
 One entry per update: what changed, how it was checked, and anything to decide.
 
+## 2026-11-18 · v2.5: Trends & goal
+
+Live: https://mikialanam.github.io/SuperHumanDay/
+
+### What changed
+1. **Stepped goals** (Move > Trends & goal), stored in the app's data under `plans`, so they're in backups.
+   - Start target, final target, date, step size and an optional stretch date. Even checkpoints, previewed as you type.
+   - Burpees start with 50/day from Nov 18, 2026 → 100/day by Mar 30, 2027 (60 Dec 14, 70 Jan 10, 80 Feb 5, 90 Mar 4); stretch 100 by Dec 25, 2026 (60 Nov 25, 70 Dec 3, 80 Dec 10, 90 Dec 18).
+   - Today's target, next checkpoint and date, on pace / close / behind for the main and stretch goals, and a checkpoint table.
+   - +50 XP (`STEPPED_GOAL_XP`) on each day the target is hit, with a toast. The stepped target also drives the goal bar, big-button tiles and nudges.
+2. **Trend chart** for every exercise: Week (days), Month (weekly totals), Year (monthly totals), paging back, dashed average, solid stepped target line, ★ on new bests, tap a bar for its numbers.
+3. Service worker cache `superhuman-day-v2.5`.
+
+### How it was checked
+- `node tests/trends.js`: 23 checks at 360×640 and 412×915, all pass (checkpoints, validation, chart bars and stars, +10 updating the card and chart at once, +50 XP bonus on reaching 50, undo, dark mode, Dec 28 after the stretch date, push-ups without a goal, bench press chart only, a removed goal staying removed).
+- `node tests/smoke.js` with `OLD=` the previous live version: all pass, same XP (527), level, streaks and totals.
+- Layout fixes from screenshots: date fields overflowing the goal sheet at 360 px, unit wrapping in the target tile, target line drawn back before the first log.
+
+### Choices you may want to change
+- **Pace** compares the last 7 finished days with what the plan asked for (`PACE_DAYS`, `PACE_CLOSE`); the first day says "In progress" instead of "Behind".
+- **+50 XP** only for stepped goals, not the plain daily goals (so past XP doesn't change).
+- **Weeks start on Monday**; Month view counts each week in full, labelled by its Monday.
+- **The target line** uses the plain daily goal before a stepped goal starts, from the first day you logged that exercise.
+- **The stretch goal** shows "Reached" if you did the final target on the stretch date itself, otherwise "Date passed".
+
 ## 2026-11-14 · v2: past dates, bigger numbers, easier picker
 
 Live: https://mikialanam.github.io/SuperHumanDay/ (published from `claude/superhuman-day-v1-v9axex`; also pushed to `claude/confident-fermat-r8it33`).
