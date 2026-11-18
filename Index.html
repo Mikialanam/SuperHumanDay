@@ -136,6 +136,7 @@ details.lad summary{cursor:pointer;font-weight:800;color:var(--sky);padding:4px 
 .ltab .past{color:var(--muted)}
 .ltab .cur{color:var(--accent);font-weight:800}
 .gempty{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+#goalform .two{align-items:end}
 .glinks{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 </style>
 
@@ -392,6 +393,48 @@ function renderTrends(){
   if(goalFormOpen){$("goalbox").hidden=true}else{$("goalbox").hidden=false;$("goalbox").innerHTML=goalHTML(g)}
   if(typeof renderChart==="function")renderChart(g);
 }
+function openGoalForm(g){
+  goalFormOpen=true;goalDelSure=false;const f=$("goalform"),tk=today(),t=targets[g.id];
+  let d=t;
+  if(!d){let a=0,n=0;for(let i=1;i<=7;i++){const k=addDays(tk,-i);if(days[k]){a+=days[k][g.id]||0;n++}}
+    const st=Math.max(g.step||1,Math.round((n?a/n:(g.step||1)*5)/(g.step||1))*(g.step||1));
+    d={start:st,final:st*2,step:Math.max(1,Math.round(st/5)),from:tk,by:addDays(tk,120),stretch:""}}
+  f.dataset.g=g.id;f.hidden=false;$("goalbox").hidden=true;
+  f.innerHTML=`<form class="new" id="goalf" novalidate><b style="font-family:var(--display)">${t?"Edit":"New"} stepped goal · ${esc(g.name)}</b>
+  <div class="two"><label for="gf-start">Start target / day<input id="gf-start" type="number" min="1" inputmode="numeric" value="${d.start}"></label>
+  <label for="gf-final">Final target / day<input id="gf-final" type="number" min="2" inputmode="numeric" value="${d.final}"></label></div>
+  <div class="two"><label for="gf-step">Raise by at each step<input id="gf-step" type="number" min="1" inputmode="numeric" value="${d.step}"></label>
+  <label for="gf-from">Start date<input id="gf-from" type="date" value="${d.from}"></label></div>
+  <div class="two"><label for="gf-by">Final target by<input id="gf-by" type="date" value="${d.by}"></label>
+  <label for="gf-stretch">Stretch date (optional)<input id="gf-stretch" type="date" value="${d.stretch||""}"></label></div>
+  <div class="note" id="gf-prev" aria-live="polite"></div>
+  <div class="row"><button class="solid" type="submit">Save goal</button><button class="ghost" type="button" id="gf-cancel">Cancel</button>${t?`<button class="x" type="button" id="gf-del" style="margin-left:auto">Remove goal</button>`:""}</div></form>`;
+  goalPreview();
+}
+function readGoalForm(){
+  const n=id=>Math.round(+$(id).value),t={start:n("gf-start"),final:n("gf-final"),step:n("gf-step"),from:$("gf-from").value,by:$("gf-by").value};
+  const st=$("gf-stretch").value;if(st)t.stretch=st;
+  let err="";
+  if(!(t.start>=1))err="Set a starting target of at least 1.";
+  else if(!(t.final>t.start))err="The final target needs to be higher than the start.";
+  else if(!(t.step>=1))err="Raise the target by at least 1 at each step.";
+  else if(!isDay(t.from)||!isDay(t.by))err="Pick a start date and a final date.";
+  else if(t.by<=t.from)err="The final date needs to be after the start date.";
+  else if(t.stretch&&!(t.stretch>t.from&&t.stretch<t.by))err="The stretch date should fall between the start and final dates.";
+  else if(Math.ceil((t.final-t.start)/t.step)>60)err="That's more than 60 steps. Raise by a bigger amount each time.";
+  return{t,err};
+}
+function goalPreview(){
+  const el=$("gf-prev");if(!el)return;const{t,err}=readGoalForm();
+  if(err){el.innerHTML=`<b style="color:var(--accent)">${esc(err)}</b>`;return}
+  const L=ladder(t,t.by),line=x=>x.map(c=>`${c.v} ${fmtD(c.k)}`).join(" → ");
+  el.innerHTML=`<b>Checkpoints:</b> ${line(L)}${t.stretch?`<br><b>Stretch:</b> ${line(ladder(t,t.stretch))}`:""}`;
+}
+document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("gf-"))goalPreview()});
+document.addEventListener("submit",e=>{if(e.target.id!=="goalf")return;e.preventDefault();
+  const{t,err}=readGoalForm();if(err){goalPreview();return}
+  const id=$("goalform").dataset.g;targets[id]=t;saveTargets();goalFormOpen=false;$("goalform").hidden=true;render();
+  toast(`Goal saved: ${t.start} → ${t.final} a day`)});
 document.addEventListener("toggle",e=>{if(e.target.classList&&e.target.classList.contains("lad"))ladOpen=e.target.open},true);
 document.addEventListener("change",e=>{if(e.target.id!=="trendsel")return;trendSel[tab]=e.target.value;goalFormOpen=false;$("goalform").hidden=true;try{localStorage.setItem("trailkin-trend",JSON.stringify(trendSel))}catch{}render()});
 
@@ -474,7 +517,7 @@ let tt;function toast(m){const el=$("toast");el.textContent=m;el.classList.add("
 function commit(k,d){const before=lvlFor(stats().xp);days[k]=d;render();store.saveDay(k,d);const after=lvlFor(stats().xp);if(after>before)toast(`Level up! You're level ${after}`)}
 document.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
-  if(b.dataset.tab){tab=b.dataset.tab;formOpen=false;confirmId=null;try{localStorage.setItem("trailkin-tab",tab)}catch{}render();return}
+  if(b.dataset.tab){tab=b.dataset.tab;formOpen=false;confirmId=null;goalFormOpen=false;$("goalform").hidden=true;try{localStorage.setItem("trailkin-tab",tab)}catch{}render();return}
   if(b.dataset.g){const g=goals().find(x=>x.id===b.dataset.g),k=today(),d=getDay(k);d.log=d.log||[];
     if(g.kind==="check"){const prev=d[g.id]||0;d[g.id]=prev?0:1;d.log.push({k:g.id,v:d[g.id],prev,t:now()});commit(k,d);if(!prev)toast(`+${g.xp} XP`)}
     else{d[g.id]=(d[g.id]||0)+g.step;d.log.push({k:g.id,v:g.step,t:now()});commit(k,d);toast(`+${Math.round(g.step*g.xp)} XP`)}
@@ -484,6 +527,10 @@ document.addEventListener("click",e=>{
   if(b.id==="beerPlus"||b.id==="beerMinus"){const k=today(),d=getDay(k);d.log=d.log||[];const v=b.id==="beerPlus"?1:-1;if(v<0&&!d.beers)return;d.beers=(d.beers||0)+v;d.log.push({k:"beers",v,t:now()});commit(k,d);if(d.beers===3&&v>0)toast("That's 3. The 2-beer quest is gone for today.");return}
   if(b.id==="undo"){const k=today(),d=getDay(k),e2=(d.log||[]).pop();if(!e2){toast("Nothing to undo today");return}
     if(e2.prev!==undefined)d[e2.k]=e2.prev;else d[e2.k]=Math.max(0,(d[e2.k]||0)-e2.v);commit(k,d);toast("Undone");return}
+  if(b.id==="goalnew"||b.id==="goaledit"){const g=selGoal();if(g)openGoalForm(g);return}
+  if(b.id==="gf-cancel"){goalFormOpen=false;$("goalform").hidden=true;render();return}
+  if(b.id==="gf-del"){if(!goalDelSure){goalDelSure=true;b.textContent="Tap to confirm";b.classList.add("sure");return}
+    delete targets[$("goalform").dataset.g];saveTargets();goalFormOpen=false;$("goalform").hidden=true;render();toast("Goal removed");return}
   if(b.id==="newgoal"){formOpen=true;$("formbox").hidden=true;renderForm();return}
   if(b.id==="ng-cancel"){formOpen=false;$("formbox").hidden=true;return}
   if(b.dataset.del){const id=b.dataset.del;if(confirmId!==id){confirmId=id;render();return}
