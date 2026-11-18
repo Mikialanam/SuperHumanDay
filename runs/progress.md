@@ -1,5 +1,8 @@
 # Progress
 
+> **Live app: GitHub Pages is the live app from now on** — https://mikialanam.github.io/SuperHumanDay/ (the home-screen app). The Claude artifact link is not what's on the phone.
+> Pages deploys from branch `claude/superhuman-day-v1-v9axex` (every "pages build and deployment" run so far is from that branch, not `main`).
+
 ## Run: Trends & stepped goals (started 2026-11-18)
 Scope: trend chart + stepped goals for any count exercise (burpees first), all in `Index.html`, data kept on the device (localStorage).
 
@@ -31,6 +34,7 @@ Scope: trend chart + stepped goals for any count exercise (burpees first), all i
 - Run complete. Pick from Later if wanted.
 
 ## Blocked
+- 2026-11-18: Merge to the Pages branch stopped. This run's work changed the old single-file Trailkin `Index.html` (from `main`). The Pages branch is the rewritten Superhuman Day v1 (`index.html`, `js/app.js`, `css/app.css`, service worker, data version 2) and has deleted `Index.html`, so the merge gives a modify/delete conflict, and even a forced merge would not put the panel in the live app. The feature needs porting into `js/app.js` on top of `claude/superhuman-day-v1-v9axex`. Waiting on Miki's go-ahead.
 
 ## Later
 - Choose Sunday vs Monday week start.
